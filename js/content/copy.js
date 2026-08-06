@@ -120,11 +120,12 @@ export function shareText(url) {
   );
 }
 
+// Placeholders cannot wrap, so every line must fit a 360px phone input.
 export const CHAT_PLACEHOLDERS = [
   'Chat disabled (for you).',
   'MottyBot prefers to listen.',
   'Your feedback is important to Motty.',
-  'Complaints may be typed here once typing is enabled. It will not be.',
+  'Complaint hours: never.',
 ];
 
 export const REPORT_NOTES = [
