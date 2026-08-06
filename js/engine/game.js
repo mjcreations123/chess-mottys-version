@@ -306,6 +306,36 @@ export class MottyGame {
         if (v.ok) { acted = this.#commitCheat(fb, events); break; }
       }
     }
+    if (!acted) {
+      // THE UNCONDITIONAL LAST RESORT. Every polite option failed (a
+      // pawn-delivered mate can defeat even the fallback wipe, which
+      // spares pawns). The game may be absurd but it may never freeze:
+      // first try a bare ungated king escape; failing that, every white
+      // piece except the king "was never there" and the king walks free.
+      const escapes = genKingEscape({ board });
+      if (escapes.length) {
+        applyMutations(board, escapes[0].muts);
+        board.setTurn(WHITE);
+        events.push(...escapes[0].events);
+        this.cheatsFired.push({ id: 'KING_ESCAPE', tier: 3, moveNumber: this.moveNumber });
+        acted = true;
+      } else {
+        for (let s = 0; s < 128; s++) {
+          if (s & 0x88) { s += 7; continue; }
+          const piece = board.squares[s];
+          if (piece > 0 && piece !== K) {
+            board.forceRemove(s);
+            events.push({
+              type: 'remove', square: alg(s), piece: pieceObj(piece),
+              cheat: { id: 'MASS_DELETE', tier: 3 },
+            });
+          }
+        }
+        board.setTurn(WHITE);
+        this.cheatsFired.push({ id: 'MASS_DELETE', tier: 3, moveNumber: this.moveNumber });
+        acted = true;
+      }
+    }
 
     this.moveNumber++;
     this.#countHash();
@@ -453,8 +483,15 @@ export class MottyGame {
 
     const attempt = (t, lenient) => {
       let candidates = generateTier(ctx, t, this.usedOnce);
-      if (emergency) candidates = candidates.concat(genKingEscape(ctx));
+      // In a mate emergency the king's escape hatches are checked FIRST —
+      // survival candidates must never be buried under flashier options by
+      // the sort or the verification cap.
+      if (emergency) candidates = genKingEscape(ctx).concat(candidates);
       candidates.sort((a, b) => b.score + b.drama * 2 - (a.score + a.drama * 2));
+      if (emergency) {
+        const escapes = candidates.filter((c) => c.id === 'KING_ESCAPE');
+        candidates = escapes.concat(candidates.filter((c) => c.id !== 'KING_ESCAPE'));
+      }
       const verified = [];
       let checked = 0;
       for (const c of candidates) {
@@ -463,11 +500,13 @@ export class MottyGame {
         const v = verifyCheat(board, this.refSearch, c, -1e9, this.budgets);
         if (!v.ok) continue; // structural rejection: stalemate, king rules
         const good = emergency
-          ? v.evalAfter >= -400
-          : lenient
-            ? v.evalAfter >= assess.evalCp - 25 // at least not notably worse
-            : v.evalAfter >= TIER_FLOOR[t] ||
-              v.evalAfter >= assess.evalCp + IMPROVE[t];
+          ? true // survival at ANY eval — that is what an emergency means
+          : assess.whiteMateThreat
+            ? v.evalAfter >= -1500 // DOOM makes relative floors meaningless
+            : lenient
+              ? v.evalAfter >= assess.evalCp - 25 // at least not notably worse
+              : v.evalAfter >= TIER_FLOOR[t] ||
+                v.evalAfter >= assess.evalCp + IMPROVE[t];
         if (good) {
           verified.push({ c, evalAfter: v.evalAfter });
           if (verified.length >= 6) break;

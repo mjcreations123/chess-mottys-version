@@ -20,7 +20,7 @@
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--label);
   z-index: 2;
 }
 

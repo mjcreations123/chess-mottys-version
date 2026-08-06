@@ -12,7 +12,8 @@
   --line-soft: #1e2735;
   --text: #e9eef5;
   --muted: #8b99ac;
-  --faint: #55637a;
+  --label: #6e7d95;  /* readable microlabels: >=3.9:1 on panels */
+  --faint: #55637a;  /* decorative fine print only */
 
   --accent: #45e3ff;      /* MottyBot's color: eval, tech, smugness */
   --accent-dim: rgba(69, 227, 255, 0.13);

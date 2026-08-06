@@ -430,8 +430,10 @@ function genDoubleMove({ board, searcher }) {
         moveEvent('cheat-move', m1.from, m1.to, p1, cap1 > 0 ? cap1 : null, meta('DOUBLE_MOVE', 2)),
         moveEvent('cheat-move', m2.from, m2.to, p2, cap2 > 0 ? cap2 : null, meta('DOUBLE_MOVE', 2)),
       ],
-      // the record shows only the second move; the first one never happened
-      notation: `${up(p2)}${alg(m2.to)}`,
+      // the record shows only the second move; the first one never
+      // happened. Pawn moves print bare (real SAN never writes "Pd5" —
+      // fake notation must be indistinguishable from the real thing)
+      notation: `${-p2 === P ? '' : up(p2)}${alg(m2.to)}`,
     }];
   } finally {
     board.restore(snap);

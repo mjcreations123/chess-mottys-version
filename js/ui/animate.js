@@ -65,6 +65,10 @@ export class Animator {
       case 'resurrect':
         return this.#spawn({ ...e, quiet: true });
       case 'remove':
+        // sneaky-tier removals must look EXACTLY like every other capture:
+        // a quick in-place fade. The escorted-off-the-premises walk is
+        // endgame-catalog theater only.
+        if (e.cheat && e.cheat.tier <= 2) return this.#quietRemove(e);
         return this.#escortOff(e);
       case 'convert':
         return this.#flip(e.square, e.to.type, e.to.color);
@@ -239,6 +243,22 @@ export class Animator {
       ],
       { duration: 260, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'forwards' }
     ).finished.catch(() => {});
+  }
+
+  // identical to a normal capture victim's exit: 150ms fade, nothing more
+  async #quietRemove(e) {
+    const el = this.board.pieceAt(e.square);
+    if (!el) return;
+    if (this.instant) { this.board.removeAt(e.square); return; }
+    const t = transformOf(e.square);
+    await el.animate(
+      [
+        { opacity: 1, transform: `${t} scale(1)` },
+        { opacity: 0, transform: `${t} scale(0.8)` },
+      ],
+      { duration: 150, easing: 'ease-in', fill: 'forwards' }
+    ).finished.catch(() => {});
+    this.board.removeAt(e.square);
   }
 
   // the deadpan masterpiece: quietly escorted from the building

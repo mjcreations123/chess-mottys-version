@@ -52,6 +52,9 @@ overlays.showStart(record, () => {
   started = true;
   busy = false;
   panels.setStatus('certified fair');
+  // boot sequence: the log should never present as an empty box
+  feed.arbiter('Match sanctioned. Regulations loaded. All of them.');
+  feed.system('Board certified level. Pieces counted: enough.');
   feed.bot(commentary.line(record.losses + record.forfeits > 0 ? 'rematch_start' : 'game_start', {
     lossCount: record.losses + record.forfeits + 1,
   }));
