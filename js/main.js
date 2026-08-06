@@ -117,11 +117,22 @@ async function handlePlayerMove({ from, to, promo }) {
 
   if (game.status !== 'playing') { finishGame({}); return; }
 
-  // MottyBot's turn
+  // MottyBot's turn. The engine's own botReply() already guarantees Black
+  // never ends this call with zero legal moves, no matter what breaks
+  // internally — but nothing guarantees the ANIMATION or UI layer can't
+  // throw on some unrelated fluke, so this whole stretch is defended too.
+  // Whatever happens, the board is resynced from the real engine state at
+  // the end and the UI is always released back to the player.
   panels.setThinking(true);
   await new Promise((r) => setTimeout(r, 60)); // let the status paint
 
-  const reply = await game.botReply();
+  let reply;
+  try {
+    reply = await game.botReply();
+  } catch (err) {
+    if (typeof console !== 'undefined') console.error('[main] botReply threw', err);
+    reply = { events: [], status: game.status, pressure: game.referee.pressure, tier: game.referee.tierFromPressure(), assessCp: lastAssess };
+  }
   panels.setThinking(false);
 
   // nervous / smug commentary keyed to the honest assessment
@@ -139,7 +150,11 @@ async function handlePlayerMove({ from, to, promo }) {
     feed.bot(commentary.line('normal_move'));
   }
 
-  await playEvents(reply.events);
+  try {
+    await playEvents(reply.events);
+  } catch (err) {
+    if (typeof console !== 'undefined') console.error('[main] playEvents threw', err);
+  }
 
   // if the check on MottyBot was resolved honestly, retire the glow
   const state = game.getState();
@@ -151,6 +166,9 @@ async function handlePlayerMove({ from, to, promo }) {
     .find((e) => e.from && e.to && e.type !== 'king-dodge' && e.type !== 'bounce');
   if (lastBotMove) board.showLastMove(lastBotMove.from, lastBotMove.to);
 
+  // The engine state is authoritative regardless of whether the animation
+  // above completed cleanly — this line is what makes the board correct
+  // even after a caught exception.
   refreshPanels();
   panels.updateEval(reply.assessCp, reply.tier, game.director.active);
   panels.applyTier(reply.tier);
@@ -247,15 +265,23 @@ function clearIdle() {
   idleTimers = [];
 }
 
-// --- dev hook: drive the UI programmatically (harness + brave friends
-// who open devtools; the bot beats them anyway) ---------------------------
+// --- dev hook: drive the UI programmatically for automated testing -------
+// LOCALHOST ONLY. This exposes the live game instance with zero guardrails
+// (direct board writes, forced resigns, everything) — it must never reach
+// a real visitor's browser. A friend who opens devtools on the deployed
+// site must find nothing to grab.
 
 import { Search } from './engine/search.js';
 import { legalMoves } from './engine/movegen.js';
 import { WHITE, F_PROMO, mvFrom, mvTo, mvFlags, alg } from './engine/constants.js';
 
-const devSearch = new Search();
-window.__mv = {
+const isDevHost =
+  location.hostname === 'localhost' ||
+  location.hostname === '127.0.0.1' ||
+  location.hostname === '[::1]';
+
+const devSearch = isDevHost ? new Search() : null;
+if (isDevHost) window.__mv = {
   game,
   isBusy: () => busy,
   state: () => game.getState(),

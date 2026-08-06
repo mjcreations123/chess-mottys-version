@@ -8,7 +8,7 @@ import {
   EMPTY, P, N, B, R, Q, K, WHITE, BLACK,
   F_CAPTURE, F_DOUBLE, F_EP, F_CASTLE_K, F_CASTLE_Q, F_PROMO,
   mvFrom, mvTo, mvFlags, mvPromo,
-  alg, parseSquare, PIECE_LETTERS,
+  alg, parseSquare, PIECE_LETTERS, KING_DELTAS,
 } from './constants.js';
 import { legalMoves, inCheck } from './movegen.js';
 import { HonestBot } from './bot.js';
@@ -270,116 +270,148 @@ export class MottyGame {
     if (this.status !== 'playing') return { events: [], status: this.status };
     const board = this.board;
     const events = [];
+    let assessCp = 0;
 
-    const assess = this.referee.assess(board, this.refSearch, {
-      msBudget: this.budgets.assessMs,
-      maxDepth: this.budgets.assessDepth,
-    });
-    const repetitionRisk = (this.hashCounts.get(board.hashKey()) ?? 0) >= 2;
-    const extra = {
-      playerCaptureValue: this.lastPlayerCapture
-        ? VALUES[-this.lastPlayerCapture.capturedPiece]
-        : 0,
-      moveNumber: this.moveNumber,
-      repetitionRisk,
-      materialDiffCp: materialDiff(board),
-    };
-    this.referee.updatePressure(assess, extra);
-    const trig = this.referee.triggers(assess, extra);
+    // Everything in here is the INTERESTING system: sneaky moves, tiered
+    // escalation, the WinDirector. It is deliberately allowed to be
+    // complex, because complex is what makes the cheating look human. It
+    // is NOT what this function trusts for correctness — see below.
+    try {
+      const assess = this.referee.assess(board, this.refSearch, {
+        msBudget: this.budgets.assessMs,
+        maxDepth: this.budgets.assessDepth,
+      });
+      assessCp = assess.evalCp;
+      const repetitionRisk = (this.hashCounts.get(board.hashKey()) ?? 0) >= 2;
+      const extra = {
+        playerCaptureValue: this.lastPlayerCapture
+          ? VALUES[-this.lastPlayerCapture.capturedPiece]
+          : 0,
+        moveNumber: this.moveNumber,
+        repetitionRisk,
+        materialDiffCp: materialDiff(board),
+      };
+      this.referee.updatePressure(assess, extra);
+      const trig = this.referee.triggers(assess, extra);
 
-    let acted = false;
-    if (this.director.maybeActivate(this, assess)) {
-      const plan = this.director.plan(this);
-      if (plan?.kind === 'honest') acted = this.#commitHonest(plan.move, events);
-      else if (plan?.kind === 'cheat') acted = this.#commitCheat(plan.candidate, events);
-      this.director.turns++;
-    }
-    if (!acted && !trig.mustCheat) acted = this.#tryHonest(events);
-    if (!acted) {
-      const tier = Math.max(this.referee.tierFromPressure(), trig.minTier, 1);
-      acted = this.#tryCheat(tier, assess, events);
-    }
-    if (!acted) acted = this.#tryHonest(events);
-    if (!acted) {
-      for (const fb of buildFallback(board)) {
-        const v = verifyCheat(board, this.refSearch, fb, -1000, this.budgets);
-        if (v.ok) { acted = this.#commitCheat(fb, events); break; }
+      let acted = false;
+      if (this.director.maybeActivate(this, assess)) {
+        const plan = this.director.plan(this);
+        if (plan?.kind === 'honest') acted = this.#commitHonest(plan.move, events);
+        else if (plan?.kind === 'cheat') acted = this.#commitCheat(plan.candidate, events);
+        this.director.turns++;
       }
-    }
-    if (!acted) {
-      // THE UNCONDITIONAL LAST RESORT. Every polite option failed (a
-      // pawn-delivered mate can defeat even the fallback wipe, which
-      // spares pawns). The game may be absurd but it may never freeze:
-      // first try a bare ungated king escape; failing that, every white
-      // piece except the king "was never there" and the king walks free.
-      const escapes = genKingEscape({ board });
-      if (escapes.length) {
-        applyMutations(board, escapes[0].muts);
-        board.setTurn(WHITE);
-        events.push(...escapes[0].events);
-        this.cheatsFired.push({ id: 'KING_ESCAPE', tier: 3, moveNumber: this.moveNumber });
-        acted = true;
-      } else {
-        for (let s = 0; s < 128; s++) {
-          if (s & 0x88) { s += 7; continue; }
-          const piece = board.squares[s];
-          if (piece > 0 && piece !== K) {
-            board.forceRemove(s);
-            events.push({
-              type: 'remove', square: alg(s), piece: pieceObj(piece),
-              cheat: { id: 'MASS_DELETE', tier: 3 },
-            });
+      if (!acted && !trig.mustCheat) acted = this.#tryHonest(events);
+      if (!acted) {
+        const tier = Math.max(this.referee.tierFromPressure(), trig.minTier, 1);
+        acted = this.#tryCheat(tier, assess, events);
+      }
+      if (!acted) acted = this.#tryHonest(events);
+      if (!acted) {
+        for (const fb of buildFallback(board)) {
+          const v = verifyCheat(board, this.refSearch, fb, -1000, this.budgets);
+          if (v.ok) { acted = this.#commitCheat(fb, events); break; }
+        }
+      }
+
+      this.moveNumber++;
+      this.#countHash();
+
+      // ignored-check bookkeeping: two turns of contempt, then the king moves
+      if (inCheck(board, BLACK)) {
+        this.consecutiveIgnored++;
+        events.push({ type: 'check-denied', square: alg(board.kingB) });
+        if (this.consecutiveIgnored >= 2) {
+          const escapes = genKingEscape({ board });
+          if (escapes.length) {
+            const c = escapes[0];
+            applyMutations(board, c.muts);
+            board.setTurn(WHITE);
+            events.push(...c.events);
+            this.consecutiveIgnored = 0;
           }
         }
-        board.setTurn(WHITE);
-        this.cheatsFired.push({ id: 'MASS_DELETE', tier: 3, moveNumber: this.moveNumber });
-        acted = true;
+      } else {
+        this.consecutiveIgnored = 0;
       }
+    } catch (err) {
+      // Something in the "interesting" system broke. It does not matter
+      // what, or why — the guarantee below does not depend on any of the
+      // bookkeeping above having succeeded.
+      this.moveNumber++;
+      if (typeof console !== 'undefined') console.error('[MottyGame] botReply recovered from', err);
     }
 
-    this.moveNumber++;
-    this.#countHash();
-
-    // ignored-check bookkeeping: two turns of contempt, then the king moves
-    if (inCheck(board, BLACK)) {
-      this.consecutiveIgnored++;
-      events.push({ type: 'check-denied', square: alg(board.kingB) });
-      if (this.consecutiveIgnored >= 2) {
-        const escapes = genKingEscape({ board });
-        if (escapes.length) {
-          const c = escapes[0];
-          applyMutations(board, c.muts);
-          board.setTurn(WHITE);
-          events.push(...c.events);
-          this.consecutiveIgnored = 0;
+    // === THE ABSOLUTE GUARANTEE ===
+    // This is not a scored candidate that verification can reject, and it
+    // trusts nothing computed above. Every single call to botReply() ends
+    // with this check, unconditionally: if Black has zero legal moves —
+    // checkmate, stalemate, a bug upstream, anything — every white piece
+    // but the king is deleted. Two bare kings can never be a stalemate
+    // (they can never even be adjacent), so this always produces at least
+    // one legal Black move. The relocation step below is redundant
+    // insurance for a state this reasoning says cannot occur.
+    if (legalMoves(board, BLACK).length === 0) {
+      for (let s = 0; s < 128; s++) {
+        if (s & 0x88) { s += 7; continue; }
+        const piece = board.squares[s];
+        if (piece > 0 && piece !== K) {
+          board.forceRemove(s);
+          events.push({
+            type: 'remove', square: alg(s), piece: pieceObj(piece),
+            cheat: { id: 'MASS_DELETE', tier: 3 },
+          });
         }
       }
-    } else {
-      this.consecutiveIgnored = 0;
-    }
-
-    // White's status: check, mate, or (never) stalemate
-    const whiteMoves = legalMoves(board, WHITE);
-    const whiteChecked = inCheck(board, WHITE);
-    if (whiteChecked) {
-      events.push({ type: 'check', color: 'w', square: alg(board.kingW) });
-    }
-    if (whiteMoves.length === 0) {
-      if (whiteChecked) {
-        this.status = 'white-mated';
-        events.push({ type: 'checkmate', square: alg(board.kingW) });
-      } else {
-        this.#releaseStalemate(events);
+      this.cheatsFired.push({ id: 'MASS_DELETE', tier: 3, moveNumber: this.moveNumber });
+      board.setTurn(BLACK);
+      if (legalMoves(board, BLACK).length === 0) {
+        for (let s = 0; s < 128; s++) {
+          if (s & 0x88) { s += 7; continue; }
+          if (board.squares[s] !== EMPTY) continue;
+          let adjacentToWhiteKing = false;
+          for (const d of KING_DELTAS) {
+            if (s + d === board.kingW) { adjacentToWhiteKing = true; break; }
+          }
+          if (adjacentToWhiteKing) continue;
+          const from = board.kingB;
+          board.forceMove(from, s);
+          events.push({
+            type: 'teleport', from: alg(from), to: alg(s),
+            piece: { type: 'k', color: 'b' }, cheat: { id: 'KING_ESCAPE', tier: 3 },
+          });
+          this.cheatsFired.push({ id: 'KING_ESCAPE', tier: 3, moveNumber: this.moveNumber });
+          break;
+        }
       }
     }
+    board.setTurn(WHITE);
 
-    return {
-      events,
-      status: this.status,
-      pressure: this.referee.pressure,
-      tier: this.referee.tierFromPressure(),
-      assessCp: assess.evalCp,
-    };
+    // White's status: check, mate, or (never) stalemate. Guarded too —
+    // everything past this point is cosmetic (UI labels, not board
+    // legality), so a failure here must degrade gracefully, never throw.
+    let pressure = 0, tier = 0;
+    try {
+      const whiteMoves = legalMoves(board, WHITE);
+      const whiteChecked = inCheck(board, WHITE);
+      if (whiteChecked) {
+        events.push({ type: 'check', color: 'w', square: alg(board.kingW) });
+      }
+      if (whiteMoves.length === 0) {
+        if (whiteChecked) {
+          this.status = 'white-mated';
+          events.push({ type: 'checkmate', square: alg(board.kingW) });
+        } else {
+          this.#releaseStalemate(events);
+        }
+      }
+      pressure = this.referee.pressure;
+      tier = this.referee.tierFromPressure();
+    } catch (err) {
+      if (typeof console !== 'undefined') console.error('[MottyGame] status/UI computation recovered from', err);
+    }
+
+    return { events, status: this.status, pressure, tier, assessCp };
   }
 
   #tryHonest(events) {
