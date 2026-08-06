@@ -1,0 +1,44 @@
+/* Chess (Motty's Version) — design tokens
+   Broadcast-tech: near-black slate, one electric cyan, alarm red stamps,
+   a bright steel board that owns the screen. The bureaucracy is in the
+   words; the surface is a modern chess-tech product. */
+
+:root {
+  /* color world */
+  --bg: #0d1117;
+  --panel: #151c26;
+  --panel-hi: #1d2635;
+  --line: #2a3547;
+  --line-soft: #1e2735;
+  --text: #e9eef5;
+  --muted: #8b99ac;
+  --faint: #55637a;
+
+  --accent: #45e3ff;      /* MottyBot's color: eval, tech, smugness */
+  --accent-dim: rgba(69, 227, 255, 0.13);
+  --alarm: #ff4d42;       /* DENIED, the Arbiter, your situation */
+  --alarm-dim: rgba(255, 77, 66, 0.12);
+
+  --sq-light: #dfe6ee;
+  --sq-dark: #5a6b85;
+  --sq-select: rgba(69, 227, 255, 0.55);
+  --sq-lastmove: rgba(69, 227, 255, 0.4);
+
+  /* type: one characterful grotesque with real weight + a warm mono */
+  --font-display: 'Bricolage Grotesque', 'Segoe UI', sans-serif;
+  --font-ui: 'Bricolage Grotesque', 'Segoe UI', sans-serif;
+  --font-mono: 'Spline Sans Mono', 'Consolas', monospace;
+
+  /* motion */
+  --dur-square: 160ms;
+  --dur-pop: 280ms;
+  --ease-move: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-slam: cubic-bezier(0.2, 0.9, 0.3, 1);
+
+  /* structure */
+  --radius: 8px;
+  --board-size: min(100vw - 24px, 92vmin, 560px);
+
+  color-scheme: dark;
+}
