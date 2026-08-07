@@ -181,7 +181,7 @@ const POOLS = {
     'I have aged. Digitally.',
   ],
   resign_refused: [
-    'MottyBot does not accept resignations. Play on. — Motty',
+    'MottyBot does not accept resignations. Play on. – Motty',
   ],
   resign_accepted: [
     'Resignation accepted. For the archive, this will be recorded as a loss by checkmate anyway.',

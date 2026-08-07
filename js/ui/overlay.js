@@ -43,10 +43,10 @@ export class Overlays {
   showStart(record, onBegin) {
     const line =
       record.losses + record.forfeits > 0
-        ? `Career record — you: ${record.wins} wins, ${record.losses} losses` +
+        ? `Career record. You: ${record.wins} wins, ${record.losses} losses` +
           (record.forfeits ? `, ${record.forfeits} forfeits (recorded as cowardice)` : '') +
           '. MottyBot: undefeated.'
-        : 'Career record — you: 0 wins. MottyBot: undefeated.';
+        : 'Career record. You: 0 wins. MottyBot: undefeated.';
     document.getElementById('start-record').textContent = line;
     document.getElementById('btn-begin').onclick = () => {
       this.veilStart.remove();

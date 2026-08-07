@@ -84,7 +84,7 @@ export const RESIGN_LABELS = ['Resign', 'Resign', 'Concede gracefully', 'Accept 
 
 export const RESIGN_REFUSAL = {
   head: 'Resignation Request',
-  body: 'MottyBot does not accept resignations. Play on.\n— Motty',
+  body: 'MottyBot does not accept resignations. Play on.\n– Motty',
   second: 'You insist. Very well. Form R-9 (Voluntary Defeat) has been filed on your behalf.',
 };
 

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#0d1117">
-<title>Chess (Motty's Version) — Officially Sanctioned Match</title>
+<meta name="theme-color" content="#14110d">
+<title>Chess (Motty's Version): Officially Sanctioned Match</title>
 <meta name="description" content="An officially sanctioned chess match against GM MottyBot. Certified fair. 0 humans have won.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="You have been challenged by GM MottyBot (2882*)">
@@ -15,9 +15,9 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preload" href="fonts/Bitter-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/GeneralSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/fonts.css">
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/board.css">
@@ -42,11 +42,11 @@
     <section class="plaque plaque--bot" aria-label="Opponent">
       <div class="plaque__portrait" aria-hidden="true">
         <svg viewBox="0 0 44 44" width="44" height="44">
-          <rect x="2" y="2" width="40" height="40" rx="8" fill="#10151d" stroke="var(--line)"/>
-          <rect x="10" y="15" width="10" height="4.5" rx="1.5" fill="var(--accent)"/>
-          <rect x="24" y="15" width="10" height="4.5" rx="1.5" fill="var(--accent)"/>
-          <rect x="14" y="27" width="16" height="2.6" rx="1.3" fill="#e7edf4"/>
-          <rect x="19" y="7" width="6" height="3" rx="1.5" fill="var(--accent)"/>
+          <rect x="2" y="2" width="40" height="40" rx="8" fill="var(--bg)" stroke="var(--line)"/>
+          <rect x="10" y="15" width="10" height="4.5" rx="1.5" fill="var(--seal)"/>
+          <rect x="24" y="15" width="10" height="4.5" rx="1.5" fill="var(--seal)"/>
+          <rect x="14" y="27" width="16" height="2.6" rx="1.3" fill="var(--text)"/>
+          <rect x="19" y="7" width="6" height="3" rx="1.5" fill="var(--seal)"/>
         </svg>
       </div>
       <div class="plaque__id">
@@ -68,7 +68,7 @@
     </section>
 
     <section class="exhibit exhibit--board">
-      <span class="exhibit__tag">Exhibit A — The Board</span>
+      <span class="exhibit__tag">Exhibit A – The Board</span>
       <div class="board" id="board">
         <div class="board__squares" id="board-squares"></div>
         <div class="board__highlights" id="board-highlights"></div>
@@ -99,7 +99,7 @@
     </section>
 
     <details class="record">
-      <summary class="record__summary">Match Record — Exhibit B</summary>
+      <summary class="record__summary">Match Record – Exhibit B</summary>
       <ol class="record__list" id="move-list"></ol>
     </details>
 
@@ -111,7 +111,7 @@
 
   <footer class="colophon">
     <p class="badge" id="fairplay-badge">
-      <svg viewBox="0 0 16 18" width="14" height="16" aria-hidden="true"><path d="M8 0l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V3z" fill="var(--accent)"/><path d="M5 8.5l2 2 4-4.5" stroke="#06232b" stroke-width="1.8" fill="none"/></svg>
+      <svg viewBox="0 0 16 18" width="14" height="16" aria-hidden="true"><path d="M8 0l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V3z" fill="var(--seal)"/><path d="M5 8.5l2 2 4-4.5" stroke="var(--bg)" stroke-width="1.8" fill="none"/></svg>
       FIDE<a class="badge__ast" href="#fn-fide" aria-label="footnote">*</a> Certified Fair Play
       <span class="badge__recert" id="badge-recert" hidden>re-certified mid-game</span>
     </p>
@@ -130,7 +130,7 @@
     <p class="cert__body">You, the challenger, will play the white pieces against
       <strong>GM* MottyBot</strong>, an engine trained personally by Motty and certified fair
       by every committee it chairs.</p>
-    <p class="cert__record" id="start-record">Career record — you: 0 wins. MottyBot: undefeated.</p>
+    <p class="cert__record" id="start-record">Career record. You: 0 wins. MottyBot: undefeated.</p>
     <button class="btn btn--primary" id="btn-begin" type="button">Begin the match</button>
     <p class="cert__fineprint">By moving a piece you accept the Regulations, including the ones written later.</p>
   </section>
@@ -139,7 +139,7 @@
 <!-- Promotion sheet -->
 <div class="sheet" id="sheet-promo" hidden>
   <div class="sheet__panel" role="dialog" aria-modal="true" aria-label="Select commission">
-    <p class="sheet__title">Select Commission — Form 9</p>
+    <p class="sheet__title">Select Commission – Form 9</p>
     <div class="sheet__choices" id="promo-choices"></div>
     <p class="sheet__fineprint">*Promotion subject to Bureau approval.</p>
   </div>
@@ -148,11 +148,11 @@
 <!-- Report modal -->
 <div class="veil" id="veil-report" hidden>
   <section class="form27b" role="dialog" aria-modal="true" aria-label="Fair play ticket">
-    <p class="form27b__head">Form 27-B — Irregularity Report</p>
+    <p class="form27b__head">Form 27-B – Irregularity Report</p>
     <p class="form27b__ticket" id="report-ticket">Fair Play Ticket #000041</p>
     <p class="form27b__body" id="report-body">Reviewing&hellip;</p>
     <div class="stamp stamp--dismissed" id="report-stamp" hidden>Dismissed</div>
-    <p class="form27b__sig" id="report-sig" hidden>Reviewed — no violation found.<br>&mdash; Motty, Head of Fair Play Committee (also the only member)</p>
+    <p class="form27b__sig" id="report-sig" hidden>Reviewed. No violation found.<br>&ndash; Motty, Head of Fair Play Committee (also the only member)</p>
     <button class="btn" id="btn-report-close" type="button" hidden>Accept the finding</button>
   </section>
 </div>

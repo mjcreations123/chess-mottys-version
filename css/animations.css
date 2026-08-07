@@ -50,7 +50,7 @@
 
 /* move-list retroactive edit flash */
 @keyframes rowflash {
-  0% { background: var(--accent-dim); }
+  0% { background: var(--seal-dim); }
   100% { background: transparent; }
 }
 

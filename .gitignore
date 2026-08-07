@@ -1,3 +1,5 @@
 .vercel
 .env*
 .claude/
+.design-dna/
+.design-dna.lock

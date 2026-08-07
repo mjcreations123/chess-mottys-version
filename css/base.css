@@ -46,12 +46,13 @@ a { color: var(--text); }
   padding: 4px 2px 14px;
   border-bottom: 1px solid var(--line-soft);
 }
-.masthead__crest svg { display: block; width: 36px; height: 42px; }
+.masthead__crest svg { display: block; width: 40px; height: 40px; }
 .masthead__titles { flex: 1; min-width: 0; }
 .masthead__title {
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: 0; /* never negative below 32px, and Bitter's a slab, not the tight grotesk this was tuned for */
   line-height: 1.25;
 }
 .masthead__paren { font-weight: 500; color: var(--muted); }
@@ -63,7 +64,7 @@ a { color: var(--text); }
   text-transform: uppercase;
   padding: 5px 10px;
   border: 1.5px solid var(--alarm);
-  color: var(--alarm);
+  color: var(--alarm-ink);
   border-radius: 6px;
   white-space: nowrap;
 }
@@ -85,10 +86,10 @@ a { color: var(--text); }
   font-size: 11.5px;
   font-weight: 600;
 }
-.badge__ast { text-decoration: none; color: var(--alarm); font-weight: 800; }
+.badge__ast { text-decoration: none; color: var(--alarm-ink); font-weight: 700; }
 .badge__recert {
   font-size: 10px;
-  color: var(--alarm);
+  color: var(--alarm-ink);
   border: 1px solid var(--alarm);
   padding: 1px 7px;
   border-radius: 5px;
@@ -98,7 +99,7 @@ a { color: var(--text); }
 
 /* focus */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--seal);
   outline-offset: 2px;
 }
 

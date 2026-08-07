@@ -47,13 +47,17 @@ const DEFS = `
     ${BASE}"/>
   <path class="detail" fill="none" stroke="var(--pd, var(--ps))" stroke-width="1.2" stroke-linecap="round" d="M14.4 18.6 H30.6"/>
 </symbol>
-<symbol id="crest" viewBox="0 0 52 62">
-  <path d="M26 2 L47 13 L47 41 L26 54 L5 41 L5 13 Z" fill="#10151d" stroke="var(--accent, #45e3ff)" stroke-width="2.5" stroke-linejoin="round"/>
-  <g transform="translate(8.6, 8.5) scale(0.78)">
-    <path d="${KNIGHT_BODY}" fill="#e7edf4"/>
+<symbol id="crest" viewBox="-3 -3 70 70">
+  <circle cx="32" cy="32" r="33" fill="var(--bg, #14110d)"/>
+  <path d="M62.50 32.00 L65.50 32.00 M61.91 37.95 L64.86 38.54 M60.18 43.67 L62.95 44.82 M57.36 48.94 L59.85 50.61 M53.57 53.57 L55.69 55.69 M48.94 57.36 L50.61 59.85 M43.67 60.18 L44.82 62.95 M37.95 61.91 L38.54 64.86 M32.00 62.50 L32.00 65.50 M26.05 61.91 L25.46 64.86 M20.33 60.18 L19.18 62.95 M15.06 57.36 L13.39 59.85 M10.43 53.57 L8.31 55.69 M6.64 48.94 L4.15 50.61 M3.82 43.67 L1.05 44.82 M2.09 37.95 L-0.86 38.54 M1.50 32.00 L-1.50 32.00 M2.09 26.05 L-0.86 25.46 M3.82 20.33 L1.05 19.18 M6.64 15.06 L4.15 13.39 M10.43 10.43 L8.31 8.31 M15.06 6.64 L13.39 4.15 M20.33 3.82 L19.18 1.05 M26.05 2.09 L25.46 -0.86 M32.00 1.50 L32.00 -1.50 M37.95 2.09 L38.54 -0.86 M43.67 3.82 L44.82 1.05 M48.94 6.64 L50.61 4.15 M53.57 10.43 L55.69 8.31 M57.36 15.06 L59.85 13.39 M60.18 20.33 L62.95 19.18 M61.91 26.05 L64.86 25.46"
+    stroke="var(--seal, #d1a636)" stroke-width="1.4" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="30.5" fill="none" stroke="var(--seal, #d1a636)" stroke-width="2"/>
+  <circle cx="32" cy="32" r="26.5" fill="none" stroke="var(--seal, #d1a636)" stroke-width="1"/>
+  <g transform="translate(17.3, 13.5) scale(1.02)">
+    <path d="${KNIGHT_BODY}" fill="var(--text, #f3ece0)"/>
   </g>
-  <rect x="6" y="44" width="40" height="8" rx="2" fill="var(--accent, #45e3ff)"/>
-  <text x="26" y="49.8" text-anchor="middle" font-family="Bricolage Grotesque, sans-serif" font-size="4.7" font-weight="800" letter-spacing="0.55" fill="#06232b">LEX MOTTUS</text>
+  <path d="M8 44 A 26.5 26.5 0 0 0 56 44 L 50.5 44 A 20.5 20.5 0 0 1 13.5 44 Z" fill="var(--seal, #d1a636)"/>
+  <text x="32" y="47.6" text-anchor="middle" font-family="General Sans, sans-serif" font-size="5.6" font-weight="600" letter-spacing="0.6" fill="var(--bg, #14110d)">LEX MOTTUS</text>
 </symbol>`;
 
 export function injectSprite() {

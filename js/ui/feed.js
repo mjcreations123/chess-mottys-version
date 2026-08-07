@@ -27,11 +27,11 @@ export class Feed {
   }
 
   bot(text) {
-    if (text) this.#add('feed__item--bot', `<strong>MottyBot</strong> — ${escapeHTML(text)}`);
+    if (text) this.#add('feed__item--bot', `<strong>MottyBot</strong>: ${escapeHTML(text)}`);
   }
 
   arbiter(text) {
-    if (text) this.#add('feed__item--arbiter', `<strong>Arbiter</strong> — ${escapeHTML(text)}`);
+    if (text) this.#add('feed__item--arbiter', `<strong>Arbiter</strong>: ${escapeHTML(text)}`);
   }
 
   system(text) {
