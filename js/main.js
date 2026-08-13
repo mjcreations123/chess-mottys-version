@@ -6,6 +6,7 @@ import { loadActive, saveActive, clearActive, loadStats, recordResult, markRules
 import { pieceSpriteSVG, pieceUse } from './ui/pieces.js';
 import { BoardView } from './ui/board.js';
 import { sound } from './ui/sound.js';
+import { pickTaunt, resetTaunts } from './content/taunts.js';
 
 document.body.insertAdjacentHTML('afterbegin', pieceSpriteSVG());
 
@@ -101,6 +102,54 @@ function updateCheckMark(fen = state.match?.fen()) {
 function setThinking(on) { $('top-thinking').hidden = !on; }
 function setYourTurn(on) { $('turn-tag').hidden = !on; }
 
+/* MottyBot's mouth */
+let tauntTimer = null;
+
+function showTaunt(line) {
+  if (!line) return;
+  const bubble = $('bot-taunt');
+  if (!bubble) return;
+  bubble.textContent = line;
+  bubble.hidden = false;
+  bubble.classList.remove('is-in');
+  void bubble.offsetWidth; // restart the entrance animation on repeat lines
+  bubble.classList.add('is-in');
+  clearTimeout(tauntTimer);
+  tauntTimer = setTimeout(() => { bubble.hidden = true; }, 4400);
+}
+
+function clearTaunt() {
+  clearTimeout(tauntTimer);
+  const bubble = $('bot-taunt');
+  if (bubble) bubble.hidden = true;
+}
+
+// A mating move is only provisional until Fate has had its say, so '#' never
+// triggers a victory lap here. endGame() does the gloating.
+function reactToMove(move, byBot) {
+  if (state.screen !== 'playing' || move.san.includes('#')) return;
+  const gaveCheck = move.san.includes('+');
+  const heavy = move.captured && VAL[move.captured] >= 5;
+  if (byBot) {
+    if (move.promotion) showTaunt(pickTaunt('botPromote', { always: true }));
+    else if (gaveCheck) showTaunt(pickTaunt('botCheck', { always: true }));
+    else if (heavy) showTaunt(pickTaunt('botBigCapture', { always: true }));
+    else if (move.captured) showTaunt(pickTaunt('botCapture'));
+    else showTaunt(pickTaunt('idle', { chance: 0.28, minGapMs: 14000 }));
+    return;
+  }
+  if (move.promotion) showTaunt(pickTaunt('playerPromote', { always: true }));
+  else if (gaveCheck) showTaunt(pickTaunt('playerCheck', { always: true }));
+  else if (heavy) showTaunt(pickTaunt('playerBigCapture', { always: true }));
+  else if (move.captured) showTaunt(pickTaunt('playerCapture'));
+}
+
+function reactToTeleport(event) {
+  if (!event || state.screen !== 'playing') return;
+  const mine = event.piece.color === state.myColor;
+  showTaunt(pickTaunt(mine ? 'fateHitYou' : 'fateHitMe', { chance: 0.45, minGapMs: 11000 }));
+}
+
 function setFate({ phase = 'idle', title, copy, route = '' }) {
   const strip = $('fate-strip');
   strip.dataset.phase = phase;
@@ -180,6 +229,7 @@ function panelHome() {
   board.setInteractive(null);
   setThinking(false);
   setYourTurn(false);
+  clearTaunt();
   const active = loadActive();
   const stats = loadStats();
   const shared = sharedConfig();
@@ -379,6 +429,9 @@ function startBotGame(level, myColor, { seed = randomSeed(), daily = null } = {}
   sound.unlock();
   sound.start();
   persistGame();
+  resetTaunts();
+  clearTaunt();
+  showTaunt(pickTaunt('greeting', { always: true }));
   botLoop(state.serial);
 }
 
@@ -399,6 +452,9 @@ function resumeGame(data) {
     panelPlaying();
     restoreLastFateEvent();
     persistGame();
+    resetTaunts();
+    clearTaunt();
+    showTaunt(pickTaunt('greeting', { always: true }));
     botLoop(state.serial);
   } catch {
     clearActive();
@@ -465,6 +521,7 @@ async function playTeleport(events) {
   updateCheckMark();
   showSettledFate(event);
   persistGame();
+  reactToTeleport(event);
 }
 
 function showSettledFate(event) {
@@ -522,6 +579,7 @@ async function botLoop(serial) {
     persistGame();
     announce(`MottyBot played ${move.san.replace('#', ' checkmate')}.`);
     await playMoveAnimation(move);
+    reactToMove(move, true);
   }
 }
 
@@ -541,6 +599,7 @@ async function handleUserMove({ from, to, promotion, instant }) {
   board.setInteractive(null);
   persistGame();
   await playMoveAnimation(move, { instant });
+  reactToMove(move, false);
   botLoop(state.serial);
 }
 
@@ -578,14 +637,21 @@ function endGame() {
   const moves = state.match.log.filter((entry) => entry.kind === 'move').length;
   const teleports = state.match.log.filter((entry) => entry.kind === 'teleport').length;
   const captures = state.match.log.filter((entry) => entry.kind === 'move' && entry.captured).length;
-  state.result = { status, outcome, moves, teleports, captures };
+  const signOff = pickTaunt(
+    outcome === 'draw' ? 'draw'
+      : outcome === 'win' ? 'botLose'
+        : status.reason === 'resignation' ? 'playerResign' : 'botWin',
+    { always: true },
+  );
+  state.result = { status, outcome, moves, teleports, captures, signOff };
   sound.end(outcome === 'win');
+  clearTaunt();
   panelPostGame();
   showResultModal();
 }
 
 function showResultModal() {
-  const { status, outcome, moves, teleports, captures } = state.result;
+  const { status, outcome, moves, teleports, captures, signOff } = state.result;
   const title = outcome === 'draw' ? 'Draw.' : outcome === 'win' ? 'You won.' : 'MottyBot won.';
   const note = outcome === 'win'
     ? 'You read the chaos better. MottyBot is allowed to lose, and this time it did.'
@@ -599,6 +665,7 @@ function showResultModal() {
       <p>${note}</p>
     </div>
     <div class="modal__body">
+      ${signOff ? `<p class="bot-quote">${escapeHTML(signOff)}<span>MottyBot</span></p>` : ''}
       <div class="result-stats">
         <div><strong>${moves}</strong><span>Moves</span></div>
         <div><strong>${teleports}</strong><span>Teleports</span></div>
@@ -669,6 +736,7 @@ function buildReplayFrames() {
 
 function enterReplay() {
   if (!state.match) return;
+  clearTaunt();
   state.screen = 'replay';
   panel.className = 'matchdesk';
   state.replay = { frames: buildReplayFrames(), index: 0 };
