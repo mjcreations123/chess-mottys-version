@@ -19,7 +19,7 @@ export function loadActive() {
   return data;
 }
 
-export function saveActive({ seed, ucis, myColor, level, daily = null, startedAt = Date.now() }) {
+export function saveActive({ seed, ucis, myColor, level, startedAt = Date.now() }) {
   try {
     localStorage.setItem(ACTIVE_KEY, JSON.stringify({
       version: 3,
@@ -27,7 +27,6 @@ export function saveActive({ seed, ucis, myColor, level, daily = null, startedAt
       ucis,
       myColor,
       level,
-      daily,
       startedAt,
       savedAt: Date.now(),
     }));
@@ -47,11 +46,10 @@ export function loadStats() {
     draws: Number(s?.draws) || 0,
     streak: Number(s?.streak) || 0,
     bestStreak: Number(s?.bestStreak) || 0,
-    daily: s?.daily && typeof s.daily === 'object' ? s.daily : {},
   };
 }
 
-export function recordResult(outcome, daily = null) {
+export function recordResult(outcome) {
   const s = loadStats();
   s.played++;
   if (outcome === 'win') {
@@ -65,7 +63,6 @@ export function recordResult(outcome, daily = null) {
     s.draws++;
     s.streak = 0;
   }
-  if (daily) s.daily[daily] = outcome;
   try { localStorage.setItem(STATS_KEY, JSON.stringify(s)); } catch {}
   return s;
 }

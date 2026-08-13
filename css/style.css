@@ -320,15 +320,15 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .btn--danger { min-height: 40px; background: transparent; border-color: #5f3d3a; color: #ef9a91; }
 .button-stack { display: grid; gap: 10px; }
 
-.resume-card, .daily-card {
+.resume-card {
   margin-bottom: 14px;
   padding: 14px;
   border: 1px solid var(--line);
   background: var(--surface-2);
   border-radius: 8px;
 }
-.resume-card strong, .daily-card strong { display: block; font-size: 14px; }
-.resume-card p, .daily-card p { color: var(--muted); font-size: 12px; line-height: 1.4; margin: 4px 0 11px; }
+.resume-card strong { display: block; font-size: 14px; }
+.resume-card p { color: var(--muted); font-size: 12px; line-height: 1.4; margin: 4px 0 11px; }
 .inline-actions { display: flex; gap: 8px; }
 .inline-actions .btn { min-height: 38px; padding: 7px 10px; font-size: 13px; }
 
@@ -486,6 +486,64 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .fate-strip { margin: 8px 10px 0; }
   .matchdesk { width: auto; max-width: 680px; height: auto; min-height: 0; margin: 18px auto 0; border-radius: 9px; }
   .desk-body--moves { max-height: 360px; }
+
+  /* On a phone the desk sits below the board, so the Play button used to be a
+     full screen scroll away. Before a game exists there is nothing to look at
+     on the board anyway, so the home and setup screens become a sheet over it
+     and the first thing you see is the button. */
+  .matchdesk--home,
+  .matchdesk--setup {
+    position: fixed;
+    top: 56px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 16;
+    width: auto;
+    max-width: none;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: color-mix(in srgb, var(--canvas) 93%, transparent);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+  .matchdesk--home .desk-head,
+  .matchdesk--setup .desk-head { border-bottom: 0; padding-bottom: 4px; }
+  .matchdesk--home .desk-head p,
+  .matchdesk--setup .desk-head p { font-size: 13.5px; }
+  .matchdesk--home .rule-sequence { gap: 9px; margin-bottom: 16px; }
+  .matchdesk--home .rule-step p { font-size: 11.5px; }
+
+  /* The sheet is the only scroller, so the primary action can pin itself to
+     the bottom and stay reachable on short phones and in landscape. */
+  .matchdesk--home .desk-body,
+  .matchdesk--setup .desk-body { overflow: visible; padding-bottom: 0; }
+  .matchdesk--home .button-stack,
+  .matchdesk--setup .button-stack {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    padding: 11px 0 calc(5px + env(safe-area-inset-bottom));
+    background: var(--canvas);
+    box-shadow: 0 -12px 16px -8px var(--canvas);
+  }
+  .matchdesk--home .stats-line { margin-top: 6px; }
+}
+
+/* Short viewports: small phones and any phone in landscape. Trim the setup
+   copy so the choices and the start button share the space. */
+@media (max-width: 900px) and (max-height: 720px) {
+  .matchdesk--home .desk-head h1,
+  .matchdesk--setup .desk-head h1 { font-size: 22px; }
+  .matchdesk--home .desk-head,
+  .matchdesk--setup .desk-head { padding-top: 14px; }
+  .matchdesk--setup .desk-head p { display: none; }
+  .matchdesk--setup .difficulty span { display: none; }
+  .matchdesk--home .rule-step p { display: none; }
 }
 
 @media (max-width: 700px) {

@@ -34,7 +34,6 @@ const state = {
   match: null,
   myColor: 'w',
   bot: BOTS.medium,
-  daily: null,
   over: true,
   animating: false,
   screen: 'home',
@@ -188,17 +187,8 @@ function persistGame() {
     ucis: moveUcIs(),
     myColor: state.myColor,
     level: state.bot.level,
-    daily: state.daily,
     startedAt: state.match.startedAt,
   });
-}
-
-function todayKey() {
-  const date = new Date();
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
 }
 
 function sharedConfig() {
@@ -233,8 +223,6 @@ function panelHome() {
   const active = loadActive();
   const stats = loadStats();
   const shared = sharedConfig();
-  const daily = todayKey();
-  const dailyResult = stats.daily[daily];
 
   panel.innerHTML = `
     <div class="desk-head">
@@ -267,11 +255,6 @@ function panelHome() {
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18.5h14M8 18.5l1-7h6l1 7M9 7.5h6M10 4h4v3.5H10Z"/></svg>
           Play MottyBot
         </button>
-        <div class="daily-card">
-          <strong>Today's chaos</strong>
-          <p>${dailyResult ? `Your result today: ${escapeHTML(dailyResult)}.` : 'One shared seed for today. Club difficulty, playing as White.'}</p>
-          <button class="btn btn--secondary" id="play-daily">${dailyResult ? 'Play again' : 'Play daily challenge'}</button>
-        </div>
       </div>
       ${stats.played ? `
         <div class="stats-line" aria-label="Your results on this device">
@@ -282,7 +265,6 @@ function panelHome() {
     </div>`;
 
   $('choose-game').onclick = panelSetup;
-  $('play-daily').onclick = () => startBotGame('medium', 'w', { seed: `daily-${daily}`, daily });
   if (shared) $('play-shared').onclick = () => startBotGame(shared.level, shared.color, { seed: shared.seed });
   if (active) {
     $('resume-game').onclick = () => resumeGame(active);
@@ -411,12 +393,11 @@ function configureBoardForMatch() {
   renderCaptured();
 }
 
-function startBotGame(level, myColor, { seed = randomSeed(), daily = null } = {}) {
+function startBotGame(level, myColor, { seed = randomSeed() } = {}) {
   state.serial++;
   state.match = new ChaosMatch(seed);
   state.myColor = myColor;
   state.bot = BOTS[level] || BOTS.medium;
-  state.daily = daily;
   state.over = false;
   state.animating = false;
   state.screen = 'playing';
@@ -442,7 +423,6 @@ function resumeGame(data) {
     state.match.startedAt = data.startedAt || Date.now();
     state.myColor = data.myColor;
     state.bot = BOTS[data.level] || BOTS.medium;
-    state.daily = data.daily || null;
     state.over = false;
     state.animating = false;
     state.screen = 'playing';
@@ -631,7 +611,7 @@ function endGame() {
 
   const outcome = outcomeFor(status);
   if (!state.resultRecorded) {
-    recordResult(outcome, state.daily);
+    recordResult(outcome);
     state.resultRecorded = true;
   }
   const moves = state.match.log.filter((entry) => entry.kind === 'move').length;
@@ -680,7 +660,7 @@ function showResultModal() {
       <div class="copy-confirm" id="copy-confirm" aria-live="polite"></div>
     </div>`);
   $('result-new').onclick = () => { hideModal(); startBotGame(state.bot.level, state.myColor); };
-  $('result-same').onclick = () => { const seed = state.match.seed; const daily = state.daily; hideModal(); startBotGame(state.bot.level, state.myColor, { seed, daily }); };
+  $('result-same').onclick = () => { const seed = state.match.seed; hideModal(); startBotGame(state.bot.level, state.myColor, { seed }); };
   $('result-review').onclick = () => { hideModal(); enterReplay(); };
   $('result-share').onclick = shareChallenge;
 }
