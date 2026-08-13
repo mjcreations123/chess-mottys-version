@@ -15,6 +15,7 @@ let teleports = 0;
 let emptyPhases = 0;
 let kingTeleports = 0;
 let firstMoveHadPriorTeleport = 0;
+let endingsLeftAlone = 0;
 const gamesEnded = { checkmate: 0, stalemate: 0, 'insufficient material': 0, 'fifty-move rule': 0, cap: 0 };
 
 function castlingSubset(before, after) {
@@ -48,6 +49,7 @@ for (let g = 0; g < GAMES; g++) {
     const sideToMove = m.turn();              // the opponent now
     assert(sideToMove !== moverSide, 'turn did not flip after a move');
     const sigBefore = materialSignature(m.chess);
+    const endedOnTheMove = m.status().over;
 
     const events = m.teleportIfDue();
     turns++;
@@ -55,6 +57,13 @@ for (let g = 0; g < GAMES; g++) {
     teleports += events.length;
     if (events.length === 0) emptyPhases++;
     assert(events.length <= 1, `more than one teleport per turn g${g} s${step}`);
+
+    // A finished game is finished: nothing may relocate after the last move.
+    if (endedOnTheMove) {
+      assert(events.length === 0, `a finished game still teleported g${g} s${step}\n${fenBefore}`);
+      assert(m.status().over, `the ending was undone g${g} s${step}`);
+      endingsLeftAlone++;
+    }
 
     const fenAfter = m.fen();
     const posAfter = parseFen(fenAfter);
@@ -102,8 +111,10 @@ for (let g = 0; g < GAMES; g++) {
 
 console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${teleports} teleports, ${emptyPhases} empty phases`);
 console.log(`  endings: ${JSON.stringify(gamesEnded)}`);
+console.log(`  endings left alone by Fate: ${endingsLeftAlone}`);
 assert(kingTeleports === 0, 'a king teleported');
 assert(firstMoveHadPriorTeleport === 0, 'a game started with a teleport before white moved');
+assert(endingsLeftAlone > 0, 'no game actually ended, so mate finality was never exercised');
 assert(teleports >= turns * 0.95, 'teleports suspiciously rare (expect ~1 per turn)');
 ok(`${GAMES} random games preserved every house-rule invariant`);
 summary('fuzz.test.mjs');

@@ -108,7 +108,7 @@ function showTaunt(line) {
   if (!line) return;
   const bubble = $('bot-taunt');
   if (!bubble) return;
-  bubble.textContent = line;
+  $('bot-taunt-line').textContent = line;
   bubble.hidden = false;
   bubble.classList.remove('is-in');
   void bubble.offsetWidth; // restart the entrance animation on repeat lines
@@ -123,8 +123,7 @@ function clearTaunt() {
   if (bubble) bubble.hidden = true;
 }
 
-// A mating move is only provisional until Fate has had its say, so '#' never
-// triggers a victory lap here. endGame() does the gloating.
+// A mating move ends the game outright, so endGame() does that gloating.
 function reactToMove(move, byBot) {
   if (state.screen !== 'playing' || move.san.includes('#')) return;
   const gaveCheck = move.san.includes('+');
@@ -827,7 +826,7 @@ function showRules() {
         <li><span class="rule-mark">3</span><span><b>The piece and destination are random.</b> Every eligible non-king piece has the same chance. Then every eligible empty square for that piece has the same chance.</span></li>
         <li><span class="rule-mark">4</span><span><b>A teleport never captures.</b> The destination must be empty. It can be unsafe, and the teleported piece can give check.</span></li>
         <li><span class="rule-mark">5</span><span><b>Pawns stop short of the back rank.</b> They may teleport to the second or seventh rank, then promote with a normal move later.</span></li>
-        <li><span class="rule-mark">6</span><span><b>The result is checked after the teleport.</b> A mating move only counts if the changed position is still mate.</span></li>
+        <li><span class="rule-mark">6</span><span><b>Checkmate ends it immediately.</b> A finished game gets no teleport. Nothing relocates after checkmate, stalemate or a draw.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);

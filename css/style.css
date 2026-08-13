@@ -588,49 +588,43 @@ button, a { -webkit-tap-highlight-color: transparent; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
 
-/* MottyBot's trash talk. Floats over the top of the board, points up at the
-   bot's own row, and clears itself so it never sits on the position. */
+/* MottyBot's trash talk. Sits below the board in normal flow, never over the
+   position: the board must always be fully visible while you are playing. */
 .bot-taunt {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 14;
-  margin: 0;
-  max-width: min(84%, 400px);
-  padding: 9px 15px;
-  background: var(--surface-3);
-  border: 1px solid var(--line-strong);
-  border-top: 2px solid var(--fate);
-  border-radius: 13px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .5);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 9px 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--fate);
+  border-radius: 9px;
   color: var(--text);
   font-size: 13.5px;
   font-weight: 620;
   line-height: 1.35;
-  text-align: center;
-  text-wrap: balance;
-  pointer-events: none;
 }
 
-.bot-taunt::before {
-  content: "";
-  position: absolute;
-  top: -7px;
-  left: 50%;
-  width: 11px;
-  height: 11px;
-  margin-left: -5.5px;
+.bot-taunt__who {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
   background: var(--surface-3);
-  border-left: 1px solid var(--fate);
-  border-top: 1px solid var(--fate);
-  transform: rotate(45deg);
+  color: var(--fate-light);
+  font-size: 13px;
+  font-weight: 800;
 }
+
+.bot-taunt__line { min-width: 0; }
 
 .bot-taunt.is-in { animation: taunt-in .2s ease-out; }
 
 @keyframes taunt-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(-7px); }
+  from { opacity: 0; transform: translateY(-5px); }
 }
 
 .bot-quote {
@@ -647,6 +641,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
 
 .bot-quote span { display: block; margin-top: 3px; color: var(--quiet); font-size: 11.5px; font-weight: 500; }
 
-@media (max-width: 720px) {
-  .bot-taunt { font-size: 12.5px; padding: 8px 12px; max-width: 90%; }
+@media (max-width: 900px) {
+  .bot-taunt { margin: 8px 10px 0; }
+}
+
+@media (max-width: 440px) {
+  .bot-taunt { font-size: 12.5px; padding: 8px 10px; gap: 8px; }
+  .bot-taunt__who { flex-basis: 23px; width: 23px; height: 23px; font-size: 12px; }
 }

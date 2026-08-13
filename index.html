@@ -62,7 +62,6 @@
 
       <div class="board-frame">
         <div class="board" id="board" aria-describedby="board-help"></div>
-        <p class="bot-taunt" id="bot-taunt" aria-live="polite" hidden></p>
       </div>
       <p id="board-help" class="visually-hidden">Select a piece by tapping it, clicking it, or focusing the board and pressing Enter. Then choose a highlighted destination.</p>
 
@@ -74,6 +73,11 @@
         </div>
         <div class="captured" id="bottom-captured" aria-label="Pieces captured by you"></div>
         <div class="turn-state" id="turn-tag" hidden>Your move</div>
+      </div>
+
+      <div class="bot-taunt" id="bot-taunt" aria-live="polite" hidden>
+        <span class="bot-taunt__who" aria-hidden="true">M</span>
+        <span class="bot-taunt__line" id="bot-taunt-line"></span>
       </div>
 
       <div class="fate-strip" id="fate-strip" aria-live="polite">

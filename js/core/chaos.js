@@ -3,13 +3,13 @@
 // and the tests both drive this.
 //
 // Turn cycle, forever the same:
-//   side to move plays  ->  ONE of that side's non-king pieces teleports
-//   ->  game over check  ->  other side plays  ->  ...
+//   side to move plays  ->  if the game ended, STOP  ->  otherwise ONE of that
+//   side's non-king pieces teleports  ->  other side plays  ->  ...
 //
 // White's very first move has no teleport before it: you move, then you
-// teleport. Because the teleport is settled before checkmate is evaluated, a
-// mating move is only final if it survives the mover's own dice roll: teleport
-// your own mating piece away and the mate evaporates. That is the game.
+// teleport. A finished game is finished: checkmate, stalemate, a dead position
+// or the fifty-move rule all end the game the instant the move lands, and no
+// teleport follows. Nothing can undo a checkmate.
 
 import { Chess } from '../vendor/chess.js';
 import { phaseRng } from './rng.js';
@@ -36,6 +36,9 @@ export class ChaosMatch {
   teleportIfDue() {
     if (!this.teleportPending) return null;
     this.teleportPending = false;
+    // A finished game is finished. The teleport never gets a chance to undo a
+    // checkmate, a stalemate or a drawn position.
+    if (this.status().over) return [];
     // the side that just moved is the opposite of whoever is now to move
     const mover = this.chess.turn() === 'w' ? 'b' : 'w';
     const rng = phaseRng(this.seed, this.ply);
@@ -79,11 +82,9 @@ export class ChaosMatch {
   applyMove({ from, to, promotion }) {
     const fenBefore = this.fen();
     const move = this.chess.move({ from, to, promotion: promotion || undefined });
-    // '#' is provisional here: mate is only real if it survives the next
-    // shuffle, so the log never claims it early.
-    const san = move.san.replace('#', '+');
+    // Checkmate is final now, so '#' means exactly what it says.
     this.log.push({
-      kind: 'move', ply: this.ply, san, uci: move.from + move.to + (move.promotion || ''),
+      kind: 'move', ply: this.ply, san: move.san, uci: move.from + move.to + (move.promotion || ''),
       color: move.color, captured: move.captured || null, flags: move.flags,
       from: move.from, to: move.to, piece: move.piece, promotion: move.promotion || null,
       fenBefore, fenAfter: this.fen(),
