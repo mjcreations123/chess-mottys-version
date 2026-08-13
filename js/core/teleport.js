@@ -47,11 +47,32 @@ export function validTeleportDests(chess, from) {
   return dests;
 }
 
+// Fate acts on every turn while you have a real army, and eases off as your
+// army disappears.
+//
+// Why: one piece is drawn from your eligible pieces, so the chance that any
+// GIVEN piece of yours is thrown across the board is 1/n. At sixteen pieces
+// that is background noise. At one piece it is a certainty, and your last
+// rook is somewhere new every single turn, which makes an endgame impossible
+// to play rather than merely chaotic. That is a hidden penalty on whoever has
+// less material.
+//
+// So the chance Fate acts at all is n / FULL_FORCE_AT, capped at 1. The chance
+// a given piece is moved becomes (n / FULL_FORCE_AT) * (1 / n) = 1 /
+// FULL_FORCE_AT: a constant, no matter how much material is left. Openings and
+// middlegames are untouched, because n is already at or above the threshold.
+export const FULL_FORCE_AT = 8;
+
+export function teleportChance(eligibleCount, fullForceAt = FULL_FORCE_AT) {
+  if (eligibleCount <= 0) return 0;
+  return Math.min(1, eligibleCount / fullForceAt);
+}
+
 // Teleport ONE random non-king piece belonging to `side` (the player who just
 // moved) to a random valid empty square. Returns an array of 0 or 1 events
-// ({ from, to, piece }); empty when nothing of theirs can legally move (e.g.
-// only a king left). Applies the change via surgical FEN edits.
-export function runTeleportPhase(chess, rng, side) {
+// ({ from, to, piece }); empty when nothing of theirs can move or when Fate
+// passes this turn. Applies the change via surgical FEN edits.
+export function runTeleportPhase(chess, rng, side, { fullForceAt = FULL_FORCE_AT, report = null } = {}) {
   const eligible = [];
   for (const sq of SQUARES) {
     const p = chess.get(sq);
@@ -60,7 +81,15 @@ export function runTeleportPhase(chess, rng, side) {
     if (dests.length) eligible.push({ from: sq, dests });
   }
 
+  if (report) { report.eligible = eligible.length; report.passed = false; }
   if (!eligible.length) return [];
+
+  // Draw the pass roll before the piece so the sequence stays deterministic.
+  if (rng.next() >= teleportChance(eligible.length, fullForceAt)) {
+    if (report) report.passed = true;
+    return [];
+  }
+
   const chosen = eligible[rng.int(eligible.length)];
   const to = chosen.dests[rng.int(chosen.dests.length)];
   const piece = chess.get(chosen.from);

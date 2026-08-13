@@ -484,7 +484,18 @@ async function playTeleport(events) {
 
   if (!events?.length) {
     state.animating = false;
-    setFate({ title: 'Fate had no eligible move', copy: 'Only the king remained, so the turn continues without a teleport.' });
+    const phase = state.match?.lastPhase;
+    if (phase?.ended) {
+      // the game just finished; the result modal speaks for itself
+    } else if (phase?.passed) {
+      setFate({
+        title: 'Fate passed this turn',
+        copy: 'With this little material left, Fate steps in less often so the endgame stays playable.',
+      });
+      announce('Fate passed this turn. Nothing teleported.');
+    } else {
+      setFate({ title: 'Fate had no eligible move', copy: 'Only the king remained, so the turn continues without a teleport.' });
+    }
     persistGame();
     return;
   }
@@ -827,6 +838,7 @@ function showRules() {
         <li><span class="rule-mark">4</span><span><b>A teleport never captures.</b> The destination must be empty. It can be unsafe, and the teleported piece can give check.</span></li>
         <li><span class="rule-mark">5</span><span><b>Pawns stop short of the back rank.</b> They may teleport to the second or seventh rank, then promote with a normal move later.</span></li>
         <li><span class="rule-mark">6</span><span><b>Checkmate ends it immediately.</b> A finished game gets no teleport. Nothing relocates after checkmate, stalemate or a draw.</span></li>
+        <li><span class="rule-mark">7</span><span><b>Fate eases off as the board empties.</b> With a full army it acts every turn. Once you are down to a handful of pieces it acts proportionally less often, so your last rook is not somewhere new every single turn and an endgame can actually be played.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);

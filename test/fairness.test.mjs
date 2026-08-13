@@ -5,7 +5,7 @@
 //      nudging material off the board or favouring either colour.
 import { Chess } from '../js/vendor/chess.js';
 import { ChaosMatch } from '../js/core/chaos.js';
-import { runTeleportPhase, validTeleportDests } from '../js/core/teleport.js';
+import { runTeleportPhase, validTeleportDests, teleportChance, FULL_FORCE_AT } from '../js/core/teleport.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
 import { assert, ok, summary } from './helpers.mjs';
 
@@ -90,7 +90,9 @@ import { assert, ok, summary } from './helpers.mjs';
   const counts = new Map(dests.map((sq) => [sq, 0]));
   for (let i = 0; i < TRIALS; i++) {
     const board = new Chess(fen);
-    const [event] = runTeleportPhase(board, makeRng(seedFromString(`dest-${i}`)), 'w');
+    // fullForceAt 1 makes Fate always act, isolating the destination draw from
+    // the endgame pass roll that is measured separately below.
+    const [event] = runTeleportPhase(board, makeRng(seedFromString(`dest-${i}`)), 'w', { fullForceAt: 1 });
     assert(event.from === 'e2', 'only the pawn can move here');
     assert(counts.has(event.to), `landed on an ineligible square ${event.to}`);
     counts.set(event.to, counts.get(event.to) + 1);
@@ -161,6 +163,55 @@ import { assert, ok, summary } from './helpers.mjs';
   }
   console.log(`  type draw: ${JSON.stringify(byType)} against eligible ${JSON.stringify(eligibleByType)}`);
   ok('piece types are drawn in proportion to how many are eligible, with no value weighting');
+}
+
+/* ---------- 3. Fate eases off in the endgame ---------- */
+
+// The whole point: the chance a GIVEN piece is thrown across the board must
+// stay flat as material disappears, instead of climbing to a certainty.
+{
+  for (const n of [1, 2, 3, 4, 6, 7]) {
+    const perPiece = teleportChance(n, FULL_FORCE_AT) / n;
+    const expected = 1 / FULL_FORCE_AT;
+    assert(Math.abs(perPiece - expected) < 1e-9,
+      `with ${n} pieces the per-piece rate is ${perPiece}, expected ${expected}`);
+  }
+  // At or above the threshold nothing changes: Fate always acts.
+  for (const n of [FULL_FORCE_AT, 10, 15, 16]) {
+    assert(teleportChance(n, FULL_FORCE_AT) === 1, `Fate must always act with ${n} pieces`);
+  }
+  assert(teleportChance(0, FULL_FORCE_AT) === 0, 'no pieces means no teleport');
+  ok(`per-piece disruption is a flat 1/${FULL_FORCE_AT} below the threshold and unchanged above it`);
+}
+
+// Measured, not just derived: a lone queen should sit still most turns.
+{
+  const fen = '4k3/8/8/8/8/8/8/3QK3 b - - 0 1';
+  const TRIALS = 8000;
+  let moved = 0;
+  for (let i = 0; i < TRIALS; i++) {
+    const board = new Chess(fen);
+    const events = runTeleportPhase(board, makeRng(seedFromString(`lone-${i}`)), 'w');
+    if (events.length) moved++;
+  }
+  const rate = moved / TRIALS;
+  const expected = 1 / FULL_FORCE_AT;
+  console.log(`  lone queen moved on ${(rate * 100).toFixed(1)}% of turns (target ${(expected * 100).toFixed(1)}%)`);
+  assert(Math.abs(rate - expected) < 0.02, `lone queen disruption ${rate}, expected about ${expected}`);
+  ok('a lone piece is left alone most turns instead of every turn');
+}
+
+// A full army is completely unaffected by the change.
+{
+  const fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1';
+  const TRIALS = 2000;
+  let moved = 0;
+  for (let i = 0; i < TRIALS; i++) {
+    const board = new Chess(fen);
+    if (runTeleportPhase(board, makeRng(seedFromString(`full-${i}`)), 'w').length) moved++;
+  }
+  assert(moved === TRIALS, `Fate must act on every turn with a full army, acted ${moved}/${TRIALS}`);
+  ok('a full army still gets a teleport every single turn');
 }
 
 summary('fairness.test.mjs');

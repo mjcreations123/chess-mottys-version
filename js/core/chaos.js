@@ -18,8 +18,10 @@ import { runTeleportPhase } from './teleport.js';
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 export class ChaosMatch {
-  constructor(seed) {
+  constructor(seed, { fullForceAt } = {}) {
     this.seed = seed;
+    this.fullForceAt = fullForceAt;
+    this.lastPhase = null; // { eligible, passed } for the most recent teleport
     this.chess = new Chess(START_FEN);
     this.ply = 0;               // half-moves played
     this.teleportPending = false; // a move was played and owes its teleport
@@ -38,12 +40,19 @@ export class ChaosMatch {
     this.teleportPending = false;
     // A finished game is finished. The teleport never gets a chance to undo a
     // checkmate, a stalemate or a drawn position.
-    if (this.status().over) return [];
+    if (this.status().over) {
+      this.lastPhase = { eligible: 0, passed: false, ended: true };
+      return [];
+    }
     // the side that just moved is the opposite of whoever is now to move
     const mover = this.chess.turn() === 'w' ? 'b' : 'w';
     const rng = phaseRng(this.seed, this.ply);
     const fenBefore = this.fen();
-    const events = runTeleportPhase(this.chess, rng, mover);
+    const report = {};
+    const options = { report };
+    if (this.fullForceAt) options.fullForceAt = this.fullForceAt;
+    const events = runTeleportPhase(this.chess, rng, mover, options);
+    this.lastPhase = report;
     const fenAfter = this.fen();
     for (const ev of events) {
       this.log.push({ kind: 'teleport', ply: this.ply, fenBefore, fenAfter, ...ev });

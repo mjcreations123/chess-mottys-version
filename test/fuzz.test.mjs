@@ -5,6 +5,7 @@ import { Chess } from '../js/vendor/chess.js';
 import { ChaosMatch } from '../js/core/chaos.js';
 import { parseFen, serializeFen } from '../js/core/fen.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
+import { FULL_FORCE_AT } from '../js/core/teleport.js';
 import { assert, ok, materialSignature, checkersOn, summary } from './helpers.mjs';
 
 const GAMES = Number(process.env.FUZZ_GAMES || 150);
@@ -16,6 +17,9 @@ let emptyPhases = 0;
 let kingTeleports = 0;
 let firstMoveHadPriorTeleport = 0;
 let endingsLeftAlone = 0;
+let passes = 0;
+let noCandidates = 0;
+let fullStrengthTurns = 0;
 const gamesEnded = { checkmate: 0, stalemate: 0, 'insufficient material': 0, 'fifty-move rule': 0, cap: 0 };
 
 function castlingSubset(before, after) {
@@ -65,6 +69,24 @@ for (let g = 0; g < GAMES; g++) {
       endingsLeftAlone++;
     }
 
+    // Every turn without a teleport must have a reason, and Fate is never
+    // allowed to pass while the mover still has a full army.
+    const phase = m.lastPhase;
+    assert(phase, `no phase report g${g} s${step}`);
+    if (events.length === 0 && !endedOnTheMove) {
+      if (phase.eligible === 0) noCandidates++;
+      else {
+        assert(phase.passed, `empty phase with ${phase.eligible} candidates was not a pass g${g} s${step}`);
+        assert(phase.eligible < FULL_FORCE_AT,
+          `Fate passed with ${phase.eligible} eligible pieces; at or above ${FULL_FORCE_AT} it must always act g${g} s${step}`);
+        passes++;
+      }
+    }
+    if (!endedOnTheMove && phase.eligible >= FULL_FORCE_AT) {
+      assert(events.length === 1, `a full army must always be teleported g${g} s${step} (eligible ${phase.eligible})`);
+      fullStrengthTurns++;
+    }
+
     const fenAfter = m.fen();
     const posAfter = parseFen(fenAfter);
 
@@ -112,9 +134,14 @@ for (let g = 0; g < GAMES; g++) {
 console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${teleports} teleports, ${emptyPhases} empty phases`);
 console.log(`  endings: ${JSON.stringify(gamesEnded)}`);
 console.log(`  endings left alone by Fate: ${endingsLeftAlone}`);
+console.log(`  skipped turns: ${passes} eased-off passes, ${noCandidates} with no candidate, ${endingsLeftAlone} finished games`);
+console.log(`  full-strength turns (always teleported): ${fullStrengthTurns}`);
 assert(kingTeleports === 0, 'a king teleported');
 assert(firstMoveHadPriorTeleport === 0, 'a game started with a teleport before white moved');
 assert(endingsLeftAlone > 0, 'no game actually ended, so mate finality was never exercised');
-assert(teleports >= turns * 0.95, 'teleports suspiciously rare (expect ~1 per turn)');
+assert(fullStrengthTurns > 0, 'no full-strength turn was exercised');
+assert(passes + noCandidates + endingsLeftAlone === turns - teleports,
+  'some turn was skipped without an explanation');
+assert(teleports >= turns * 0.7, 'teleports suspiciously rare across whole games');
 ok(`${GAMES} random games preserved every house-rule invariant`);
 summary('fuzz.test.mjs');

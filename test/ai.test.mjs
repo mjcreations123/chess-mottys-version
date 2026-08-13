@@ -79,36 +79,77 @@ for (const level of ['easy', 'medium', 'hard']) {
   ok('mate found at full depth with a real time budget');
 }
 
-// 5c. Deeper search must beat shallower search head to head, both colors.
-// If depth buys nothing, the evaluation or the window is broken.
+// 5c. Deeper search must beat shallower search head to head, both colours.
+// Played as PLAIN chess: the teleport rule is deliberately random enough to
+// swamp a depth advantage over a handful of games, so mixing it in would test
+// the dice rather than the engine. Material is the verdict where a game does
+// not finish inside the ply cap.
 {
-  let strongWins = 0;
-  let weakWins = 0;
-  for (let g = 0; g < 4; g++) {
+  const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+  let strongBetter = 0;
+  let weakBetter = 0;
+  for (let g = 0; g < 6; g++) {
     const strongIsWhite = g % 2 === 0;
-    const m = new ChaosMatch(`strength-${g}`);
-    for (let step = 0; step < 60; step++) {
-      if (m.status().over) break;
-      const strongToMove = (m.turn() === 'w') === strongIsWhite;
+    const board = new Chess();
+    for (let step = 0; step < 70 && !board.isGameOver(); step++) {
+      const strongToMove = (board.turn() === 'w') === strongIsWhite;
       const mv = think(
-        m.fen(),
+        board.fen(),
         strongToMove ? 'hard' : 'easy',
         `s-${g}-${step}`,
-        strongToMove ? { maxDepth: 4, timeMs: 900, quiesce: true } : { maxDepth: 1, timeMs: 60, quiesce: false, randomChance: 0 },
+        strongToMove
+          ? { maxDepth: 4, timeMs: 700, quiesce: true, jitter: 0, randomChance: 0 }
+          : { maxDepth: 1, timeMs: 60, quiesce: false, jitter: 0, randomChance: 0 },
       );
       if (!mv) break;
-      m.applyMove(mv);
-      m.teleportIfDue();
+      board.move(mv);
     }
-    const st = m.status();
-    if (st.over && st.winner) {
-      const strongWon = (st.winner === 'w') === strongIsWhite;
-      strongWon ? strongWins++ : weakWins++;
+    let edge = 0; // material from the strong side's view
+    for (const cell of board.board().flat()) {
+      if (!cell || cell.type === 'k') continue;
+      const mine = (cell.color === 'w') === strongIsWhite;
+      edge += (mine ? 1 : -1) * VALUE[cell.type];
     }
+    if (board.isCheckmate()) {
+      // side to move is mated, so the other side won
+      const winnerIsWhite = board.turn() === 'b';
+      (winnerIsWhite === strongIsWhite) ? strongBetter++ : weakBetter++;
+    } else if (edge > 2) strongBetter++;
+    else if (edge < -2) weakBetter++;
   }
-  console.log(`  strength: deep ${strongWins} - ${weakWins} shallow (rest unfinished)`);
-  assert(strongWins > weakWins, `deeper search did not outplay shallower (${strongWins}-${weakWins})`);
+  console.log(`  strength (plain chess): deep ahead in ${strongBetter}/6, shallow ahead in ${weakBetter}/6`);
+  assert(strongBetter > weakBetter, `deeper search did not outplay shallower (${strongBetter}-${weakBetter})`);
   ok('deeper search outplays shallower search');
+}
+
+// 5d. Endgame technique. Against a bare king material never changes, so
+// without a mating drive the eval is flat and the search shuffles until the
+// fifty-move rule. It must find a basic mate and herd the lone king outward.
+{
+  const OPTS = { maxDepth: 4, timeMs: 900, quiesce: true, jitter: 0 };
+  const mv = think('7k/8/7K/8/8/8/8/R7 w - - 0 1', 'hard', 'rook-mate', OPTS);
+  assert(mv.from === 'a1' && mv.to === 'a8', `missed the rook mate in one, played ${mv.from}${mv.to}`);
+
+  const centreDist = (sq) => {
+    const f = sq.charCodeAt(0) - 97;
+    const r = sq.charCodeAt(1) - 49;
+    return Math.max(3 - f, f - 4) + Math.max(3 - r, r - 4);
+  };
+  const board = new Chess('8/8/4k3/8/8/8/8/Q3K3 w - - 0 1');
+  const before = centreDist('e6');
+  for (let i = 0; i < 18 && !board.isGameOver(); i++) {
+    const best = think(board.fen(), 'hard', `drive-${i}`, OPTS);
+    if (!best) break;
+    board.move(best);
+    if (board.isGameOver()) break;
+    const replies = board.moves({ verbose: true });
+    if (!replies.length) break;
+    board.move(replies[0]);
+  }
+  const king = board.board().flat().find((c) => c && c.type === 'k' && c.color === 'b');
+  const after = king ? centreDist(king.square) : 6;
+  assert(after > before, `the lone king was not driven outward: centre distance ${before} -> ${after}`);
+  ok(`drives a bare king from the centre toward the edge (distance ${before} -> ${after})`);
 }
 
 // 6. determinism of the bot given identical seed (needed nowhere in gameplay,

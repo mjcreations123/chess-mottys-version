@@ -9,12 +9,16 @@ import { assert, ok, summary } from './helpers.mjs';
 
 const FEN = '7k/8/8/8/8/8/8/KNB5 b - - 0 1';
 const RUNS = 24000;
+// This file measures the DRAW, not how often Fate acts. With two pieces left
+// Fate deliberately passes most turns (see fairness.test.mjs), so force it to
+// act every time and the two concerns stay separately testable.
+const ALWAYS = { fullForceAt: 1 };
 const pieces = new Map([['b1', 0], ['c1', 0]]);
 const knightDests = new Map(validTeleportDests(new Chess(FEN), 'b1').map((sq) => [sq, 0]));
 
 for (let i = 0; i < RUNS; i++) {
   const chess = new Chess(FEN);
-  const ev = runTeleportPhase(chess, makeRng(seedFromString(`distribution-${i}`)), 'w')[0];
+  const ev = runTeleportPhase(chess, makeRng(seedFromString(`distribution-${i}`)), 'w', ALWAYS)[0];
   assert(ev, `missing event at run ${i}`);
   pieces.set(ev.from, (pieces.get(ev.from) || 0) + 1);
   if (ev.from === 'b1') knightDests.set(ev.to, (knightDests.get(ev.to) || 0) + 1);
@@ -41,8 +45,8 @@ for (let ply = 1; ply <= 500; ply++) {
   const left = new Chess(FEN);
   const right = new Chess(FEN);
   const seed = seedFromString(`phase-contract#${ply}`);
-  const a = runTeleportPhase(left, makeRng(seed), 'w')[0];
-  const b = runTeleportPhase(right, makeRng(seed), 'w')[0];
+  const a = runTeleportPhase(left, makeRng(seed), 'w', ALWAYS)[0];
+  const b = runTeleportPhase(right, makeRng(seed), 'w', ALWAYS)[0];
   assert(a.from === b.from && a.to === b.to, `phase ${ply} was not reproducible`);
 }
 ok('teleport outcomes are reproducible from seed and ply alone');

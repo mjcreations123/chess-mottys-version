@@ -89,15 +89,35 @@ const PST = {
 // keeps the best move from the last COMPLETED depth when timeMs runs out. So
 // raising both makes the bot genuinely stronger on quiet positions without
 // ever risking a stall.
+// endgameBonus caps how much extra depth a level may claim in a sparse
+// position. Hard gets the lot so it can finish a won endgame; easy gets very
+// little, because an easy bot that suddenly plays perfect endgames would take
+// away exactly the games a beginner can win.
 export const LEVELS = {
-  easy: { maxDepth: 2, timeMs: 600, jitter: 70, randomChance: 0.14, quiesce: false },
-  medium: { maxDepth: 4, timeMs: 1800, jitter: 10, randomChance: 0, quiesce: true },
-  hard: { maxDepth: 7, timeMs: 4200, jitter: 0, randomChance: 0, quiesce: true },
+  easy: { maxDepth: 2, timeMs: 600, jitter: 70, randomChance: 0.14, quiesce: false, endgameBonus: 2 },
+  medium: { maxDepth: 4, timeMs: 1800, jitter: 10, randomChance: 0, quiesce: true, endgameBonus: 5 },
+  hard: { maxDepth: 7, timeMs: 4200, jitter: 0, randomChance: 0, quiesce: true, endgameBonus: 10 },
 };
+
+// Manhattan distance from the middle of the board: 0 in the centre, 6 in a
+// corner. Used to herd a bare king toward the edge where it can be mated.
+const CENTER_DIST = (() => {
+  const table = new Int8Array(64);
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      table[r * 8 + f] = Math.max(3 - f, f - 4) + Math.max(3 - r, r - 4);
+    }
+  }
+  return table;
+})();
 
 function evaluate(chess) {
   // score from the perspective of the side to move
   let score = 0;
+  let forceW = 0;
+  let forceB = 0;
+  let kingW = -1;
+  let kingB = -1;
   const rows = chess.board();
   let nonPawnMaterial = 0;
   const bishops = { w: 0, b: 0 };
@@ -117,7 +137,12 @@ function evaluate(chess) {
       const cell = row[f];
       if (!cell) continue;
       const base = VAL[cell.type];
-      const idx = cell.color === 'w' ? r * 8 + f : (7 - r) * 8 + f;
+      const at = r * 8 + f;
+      if (cell.type === 'k') {
+        if (cell.color === 'w') kingW = at; else kingB = at;
+      } else if (cell.color === 'w') forceW += base;
+      else forceB += base;
+      const idx = cell.color === 'w' ? at : (7 - r) * 8 + f;
       const positional = cell.type === 'k' && endgame ? KING_END[idx] : PST[cell.type][idx];
       const v = base + positional;
       score += cell.color === 'w' ? v : -v;
@@ -135,6 +160,23 @@ function evaluate(chess) {
       if (count && !pawnFiles[color][file - 1] && !pawnFiles[color][file + 1]) structure -= count * 8;
     }
     score += color === 'w' ? structure : -structure;
+  }
+
+  // Mating drive. Against a bare king, material never changes and every quiet
+  // move evaluates the same, so the search shuffles forever and the game dies
+  // by the fifty-move rule. Reward pushing the lone king to the edge and
+  // walking the other king in beside it; that is the whole technique.
+  const lead = forceW - forceB;
+  if (Math.abs(lead) >= 300 && kingW >= 0 && kingB >= 0) {
+    const strongIsWhite = lead > 0;
+    const weakForce = strongIsWhite ? forceB : forceW;
+    if (weakForce <= 100) {
+      const loser = strongIsWhite ? kingB : kingW;
+      const winner = strongIsWhite ? kingW : kingB;
+      const apart = Math.abs((loser >> 3) - (winner >> 3)) + Math.abs((loser & 7) - (winner & 7));
+      const drive = 4.7 * CENTER_DIST[loser] + 1.6 * (14 - apart);
+      score += strongIsWhite ? drive : -drive;
+    }
   }
 
   let view = chess.turn() === 'w' ? score : -score;
@@ -156,8 +198,28 @@ function orderMoves(moves, preferUci) {
   });
 }
 
+// With few pieces on the board the branching factor collapses, so the same
+// time budget buys far more depth. Without this the search is too shallow to
+// see a mating net and a won endgame shuffles into a fifty-move draw.
+function endgameDepthBonus(fen) {
+  const placement = fen.split(' ')[0];
+  let pieces = 0;
+  for (let i = 0; i < placement.length; i++) {
+    const code = placement.charCodeAt(i);
+    if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) pieces++;
+  }
+  if (pieces <= 5) return 10;
+  if (pieces <= 7) return 8;
+  if (pieces <= 10) return 5;
+  if (pieces <= 14) return 2;
+  return 0;
+}
+
 export function think(fen, level, seed, opts = {}) {
   const cfg = { ...LEVELS[level] || LEVELS.medium, ...opts };
+  // Iterative deepening still respects timeMs, so a deeper ceiling can never
+  // stall: it just uses the budget better when the position is simple.
+  cfg.maxDepth += Math.min(endgameDepthBonus(fen), cfg.endgameBonus ?? 10);
   const rng = makeRng(seedFromString(String(seed ?? 'mottybot')));
   const chess = new Chess(fen);
   const rootMoves = chess.moves({ verbose: true });

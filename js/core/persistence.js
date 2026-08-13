@@ -1,4 +1,6 @@
-const ACTIVE_KEY = 'mv-active-v3';
+// v4: the teleport schedule changed (Fate eases off in the endgame), so a v3
+// save would replay into a different position than the one it was saved from.
+const ACTIVE_KEY = 'mv-active-v4';
 const STATS_KEY = 'mv-stats-v3';
 const RULES_KEY = 'mv-rules-seen-v3';
 
@@ -13,7 +15,7 @@ const read = (key, fallback) => {
 
 export function loadActive() {
   const data = read(ACTIVE_KEY, null);
-  if (!data || data.version !== 3 || typeof data.seed !== 'string' || !Array.isArray(data.ucis)) return null;
+  if (!data || data.version !== 4 || typeof data.seed !== 'string' || !Array.isArray(data.ucis)) return null;
   if (!['w', 'b'].includes(data.myColor)) return null;
   if (!['easy', 'medium', 'hard'].includes(data.level)) return null;
   return data;
@@ -22,7 +24,7 @@ export function loadActive() {
 export function saveActive({ seed, ucis, myColor, level, startedAt = Date.now() }) {
   try {
     localStorage.setItem(ACTIVE_KEY, JSON.stringify({
-      version: 3,
+      version: 4,
       seed,
       ucis,
       myColor,
