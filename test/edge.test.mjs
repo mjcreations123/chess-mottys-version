@@ -1,5 +1,6 @@
 // Directed edge cases for the surgical FEN work and rule corners.
 import { Chess } from '../js/vendor/chess.js';
+import { ChaosMatch } from '../js/core/chaos.js';
 import { parseFen, serializeFen, applyTeleport } from '../js/core/fen.js';
 import { validTeleportDests, runTeleportPhase } from '../js/core/teleport.js';
 import { makeRng } from '../js/core/rng.js';
@@ -67,17 +68,27 @@ import { assert, ok, summary, checkersOn } from './helpers.mjs';
   ok('blocker teleport cannot create a new check');
 }
 
-// 6. King teleports only to strictly safe squares
+// 6. Kings are never drawn as teleport candidates
 {
-  const fen = '7k/8/8/8/8/8/q7/K7 w - - 0 1'; // white king a1, black queen a2 gives check
-  const chess = new Chess(fen);
-  const dests = validTeleportDests(chess, 'a1');
-  assert(dests.length > 0, 'king must have safe squares');
-  for (const d of dests) {
-    const pos = applyTeleport(parseFen(fen), 'a1', d);
-    assert(checkersOn(serializeFen(pos), 'w').length === 0, `king dest ${d} not safe`);
+  // white has only a king plus one pawn; the king must never be the piece picked
+  const chess = new Chess('7k/8/8/8/8/8/4P3/4K3 b - - 0 1');
+  for (let s = 0; s < 40; s++) {
+    const probe = new Chess(chess.fen());
+    const events = runTeleportPhase(probe, makeRng(1000 + s), 'w');
+    for (const ev of events) {
+      assert(ev.piece.type !== 'k', `king was teleported (seed ${s})`);
+      assert(ev.from === 'e2', `expected the pawn to move, got ${ev.from}`);
+    }
   }
-  ok('king teleport is strictly safe (and may resolve a real check)');
+  ok('kings are never teleport candidates');
+}
+
+// 6b. A side with ONLY a king teleports nothing at all
+{
+  const chess = new Chess('7k/8/8/8/8/8/8/4K3 b - - 0 1');
+  const events = runTeleportPhase(chess, makeRng(7), 'w');
+  assert(events.length === 0, `lone king should not teleport, got ${events.length} events`);
+  ok('a lone king yields no teleport');
 }
 
 // 7. Checking piece may not teleport into a new checking square
@@ -107,15 +118,28 @@ import { assert, ok, summary, checkersOn } from './helpers.mjs';
   ok('real check persists through unrelated teleports');
 }
 
-// 9. Full phase on a bare-kings board: nothing crashes, kings stay legal
+// 9. Bare-kings board: nothing crashes, nothing moves, kings stay legal
 {
   const chess = new Chess('7k/8/8/8/8/8/8/K7 w - - 0 1');
-  const rng = makeRng(12345);
-  const events = runTeleportPhase(chess, rng);
+  const events = runTeleportPhase(chess, makeRng(12345), 'b');
+  assert(events.length === 0, 'bare kings should produce no teleport');
   assert(checkersOn(chess.fen(), 'w').length === 0, 'white king safe');
   assert(checkersOn(chess.fen(), 'b').length === 0, 'black king safe');
-  // kings never adjacent (adjacency = attacked by enemy king)
-  ok(`bare kings phase ran (${events.length} teleports) and stayed legal`);
+  ok('bare-kings board is a no-op and stays legal');
+}
+
+// 10. Post-move ordering: a mating move can be undone by the mover's own
+// teleport, and the mover is never left capturable.
+{
+  const m = new ChaosMatch('order-check');
+  assert(m.log.length === 0, 'game must not start with a teleport');
+  assert(m.teleportIfDue() === null, 'nothing is owed before the first move');
+  m.applyMove({ from: 'e2', to: 'e4' });
+  const ev = m.teleportIfDue();
+  assert(Array.isArray(ev), 'a teleport is owed right after the move');
+  assert(ev.every((e) => e.piece.color === 'w'), 'white moved, so white must teleport');
+  assert(m.teleportIfDue() === null, 'the same teleport must not run twice');
+  ok('teleport is owed after the move, once, by the mover');
 }
 
 // 10. serialize(parse(x)) === x for a pile of tricky FENs

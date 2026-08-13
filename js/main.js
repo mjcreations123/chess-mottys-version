@@ -14,10 +14,13 @@ const $ = (id) => document.getElementById(id);
 const panel = $('panel');
 const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 const BOTS = {
-  easy: { name: 'MottyBot Jr.', rating: 600, level: 'easy', blurb: 'Learning the moves. Occasionally forgets them.' },
-  medium: { name: 'MottyBot', rating: 1200, level: 'medium', blurb: 'Plays honest chess. Complains about the dice.' },
-  hard: { name: 'GM MottyBot', rating: 2000, level: 'hard', blurb: 'Very strong. Still cannot control the universe.' },
+  easy: { name: 'MottyBot Jr.', rating: 800, level: 'easy', blurb: 'Learning the moves. Occasionally forgets them.' },
+  medium: { name: 'MottyBot', rating: 1500, level: 'medium', blurb: 'Plays honest chess. Complains about the dice.' },
+  hard: { name: 'GM MottyBot', rating: 2200, level: 'hard', blurb: 'Thinks properly. Will punish you. Cannot control the universe.' },
 };
+
+// The bot always appears to deliberate, even when the search finishes early.
+const MIN_THINK_MS = 900;
 
 const state = {
   match: null,
@@ -135,8 +138,9 @@ function panelHome() {
     <div class="panel__body">
       <div class="rules-blurb">
         Real chess, fair engine, standard rules. Except one:
-        <b>before your turn, one of your own pieces teleports to a random square.</b>
-        Same for your opponent. Nobody chooses which. Nobody chooses where.
+        <b>right after you move, one of your own pieces teleports to a random
+        empty square.</b> Same for your opponent, after theirs. Kings stay put.
+        Nobody chooses which piece. Nobody chooses where.
       </div>
       <button class="btn btn--green" id="go-bot">
         <svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3" fill="currentColor"/><circle cx="9.5" cy="12.5" r="1.8" fill="#81B64C"/><circle cx="14.5" cy="12.5" r="1.8" fill="#81B64C"/><rect x="11" y="3" width="2" height="4" fill="currentColor"/></svg>
@@ -307,20 +311,24 @@ function startBotGame(lvl, myColor) {
 async function botLoop() {
   const m = state.match;
   while (!state.over && state.match === m) {
-    const events = m.shuffleIfDue();
-    if (events) await playTeleports(events);
+    // 1. settle the teleport owed by the move that just happened
+    await playTeleports(m.teleportIfDue());
     if (state.over || state.match !== m) return;
+
+    // 2. is it actually over, now that the dice have landed?
     const st = m.status();
     if (st.over) { endGame(); return; }
     if (st.check && m.turn() === state.myColor) sound.check();
 
+    // 3. your turn: hand control back and wait for handleUserMove
     if (m.turn() === state.myColor) {
       setYourTurn(true);
       setThinking(false);
       board.setInteractive(state.myColor, (sq) => m.legalMoves(sq));
-      return; // wait for handleUserMove to resume the loop
+      return;
     }
-    // bot's turn
+
+    // 4. bot's turn
     setYourTurn(false);
     board.setInteractive(null);
     setThinking(true);
@@ -332,9 +340,9 @@ async function botLoop() {
       const legal = m.legalMoves();
       mv = legal.length ? { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } : null;
     }
-    // small pause so instant replies feel deliberate
+    // never snap: a move that lands instantly still reads as deliberation
     const elapsed = Date.now() - t0;
-    if (elapsed < 450) await wait(450 - elapsed);
+    if (elapsed < MIN_THINK_MS) await wait(MIN_THINK_MS - elapsed);
     setThinking(false);
     if (!mv || state.over || state.match !== m) return;
     const move = m.applyMove(mv);
@@ -375,13 +383,13 @@ function showRules() {
       <div class="modal__sub">Chess, technically</div></div>
     <div class="modal__body">
       <p class="modal__rule-title">The one rule</p>
-      <p>Before <b>each player's turn</b>, one of their own pieces teleports to a random empty square. Totally random. Nobody chooses which piece. Nobody chooses where.</p>
+      <p>You move first. Then <b>one of your own pieces teleports</b> to a random empty square. Your opponent moves, then one of theirs does the same. Totally random. Nobody chooses which piece. Nobody chooses where.</p>
       <p class="modal__rule-title">The small print</p>
-      <p>Kings teleport too, but only somewhere safe. A king has dignity.</p>
+      <p><b>Kings never teleport.</b> Kings do not do that sort of thing.</p>
       <p>Teleports never capture and never create a check. Fate is chaotic, not cruel.</p>
       <p>A pawn cannot teleport onto the last rank. It can land one square short and make you sweat.</p>
-      <p>Checkmate only counts if it survives the next teleport. Yes, really.</p>
-      <p>Everything else is completely standard chess, played fairly. Good luck with your opening prep.</p>
+      <p>Checkmate only counts once your own teleport is done. Deliver mate, then watch the universe fling your mating piece into a corner. It happens.</p>
+      <p>Everything else is completely standard chess, played fairly by a bot that is genuinely trying to beat you. Good luck with your opening prep.</p>
       <button class="btn btn--green" id="m-ok">Understood. Probably.</button>
     </div>`);
   $('m-ok').onclick = hideModal;

@@ -13,12 +13,12 @@ for (const level of ['easy', 'medium', 'hard']) {
   for (let g = 0; g < 3; g++) {
     const m = new ChaosMatch(`ai-${level}-${g}`);
     for (let step = 0; step < 40; step++) {
-      m.shuffleIfDue();
       if (m.status().over) break;
       const mv = think(m.fen(), level, `${level}-${g}-${step}`, FAST);
       assert(mv, `bot returned null with legal moves at ${level} g${g} s${step}`);
       // applyMove throws if illegal
       m.applyMove(mv);
+      m.teleportIfDue();
     }
   }
   ok(`${level}: bot vs bot chaos games all legal`);
@@ -64,6 +64,51 @@ for (const level of ['easy', 'medium', 'hard']) {
   } else {
     ok(`forced-move fen actually has ${legal.length} moves, skipped`);
   }
+}
+
+// 5b. Mate in TWO under a real time budget. This is the exact shape of the
+// fail-hard quiescence bug: a narrow alpha-beta window used to hand back the
+// bound itself, so quiet moves wore mate scores and outranked real mate.
+{
+  const fen = '6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1'; // Ra8#
+  for (const level of ['medium', 'hard']) {
+    const mv = think(fen, level, 'mate-window');
+    assert(mv.from === 'a1' && mv.to === 'a8',
+      `${level} played ${mv.from}${mv.to} instead of mate; quiescence may be fail-hard again`);
+  }
+  ok('mate found at full depth with a real time budget');
+}
+
+// 5c. Deeper search must beat shallower search head to head, both colors.
+// If depth buys nothing, the evaluation or the window is broken.
+{
+  let strongWins = 0;
+  let weakWins = 0;
+  for (let g = 0; g < 4; g++) {
+    const strongIsWhite = g % 2 === 0;
+    const m = new ChaosMatch(`strength-${g}`);
+    for (let step = 0; step < 60; step++) {
+      if (m.status().over) break;
+      const strongToMove = (m.turn() === 'w') === strongIsWhite;
+      const mv = think(
+        m.fen(),
+        strongToMove ? 'hard' : 'easy',
+        `s-${g}-${step}`,
+        strongToMove ? { maxDepth: 4, timeMs: 900, quiesce: true } : { maxDepth: 1, timeMs: 60, quiesce: false, randomChance: 0 },
+      );
+      if (!mv) break;
+      m.applyMove(mv);
+      m.teleportIfDue();
+    }
+    const st = m.status();
+    if (st.over && st.winner) {
+      const strongWon = (st.winner === 'w') === strongIsWhite;
+      strongWon ? strongWins++ : weakWins++;
+    }
+  }
+  console.log(`  strength: deep ${strongWins} - ${weakWins} shallow (rest unfinished)`);
+  assert(strongWins > weakWins, `deeper search did not outplay shallower (${strongWins}-${weakWins})`);
+  ok('deeper search outplays shallower search');
 }
 
 // 6. determinism of the bot given identical seed (needed nowhere in gameplay,

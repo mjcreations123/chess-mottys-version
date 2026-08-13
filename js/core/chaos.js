@@ -1,13 +1,15 @@
 // ChaosMatch: one game of Chess (Motty's Version). Owns the Chess instance,
-// the deterministic shuffle schedule, and the event log. No DOM here; the UI
+// the deterministic teleport schedule, and the event log. No DOM here; the UI
 // and the tests both drive this.
 //
 // Turn cycle, forever the same:
-//   shufflePhase(ply)  ->  game over check  ->  side to move plays  ->  ply++
+//   side to move plays  ->  ONE of that side's non-king pieces teleports
+//   ->  game over check  ->  other side plays  ->  ...
 //
-// The pre-turn shuffle runs BEFORE checkmate is evaluated, so a mating move
-// is only final if the victim is still dead after the dice roll. That is the
-// game. Nothing is over until the teleporter says it is over.
+// White's very first move has no teleport before it: you move, then you
+// teleport. Because the teleport is settled before checkmate is evaluated, a
+// mating move is only final if it survives the mover's own dice roll: teleport
+// your own mating piece away and the mate evaporates. That is the game.
 
 import { Chess } from '../vendor/chess.js';
 import { phaseRng } from './rng.js';
@@ -19,29 +21,31 @@ export class ChaosMatch {
   constructor(seed) {
     this.seed = seed;
     this.chess = new Chess(START_FEN);
-    this.ply = 0;              // half-moves played
-    this.shuffledForPly = -1;  // last ply index whose pre-turn shuffle ran
-    this.log = [];             // { kind: 'move'|'teleport', ... }
+    this.ply = 0;               // half-moves played
+    this.teleportPending = false; // a move was played and owes its teleport
+    this.log = [];              // { kind: 'move'|'teleport', ... }
     this.resignedBy = null;
   }
 
   turn() { return this.chess.turn(); }
   fen() { return this.chess.fen(); }
 
-  // Run the pre-turn shuffle for the current ply if it has not run yet.
-  // Returns the teleport events (possibly empty array), or null if already run.
-  shuffleIfDue() {
-    if (this.shuffledForPly >= this.ply) return null;
+  // Settle the teleport owed by the move just played. Returns the events
+  // (array of 0 or 1), or null when nothing is owed.
+  teleportIfDue() {
+    if (!this.teleportPending) return null;
+    this.teleportPending = false;
+    // the side that just moved is the opposite of whoever is now to move
+    const mover = this.chess.turn() === 'w' ? 'b' : 'w';
     const rng = phaseRng(this.seed, this.ply);
-    const events = runTeleportPhase(this.chess, rng, 1);
-    this.shuffledForPly = this.ply;
+    const events = runTeleportPhase(this.chess, rng, mover);
     for (const ev of events) {
       this.log.push({ kind: 'teleport', ply: this.ply, ...ev });
     }
     return events;
   }
 
-  // Game status. Only meaningful after the pre-turn shuffle has run.
+  // Game status. Only meaningful once any owed teleport has been settled.
   status() {
     if (this.resignedBy) {
       return {
@@ -80,6 +84,7 @@ export class ChaosMatch {
       from: move.from, to: move.to, piece: move.piece, promotion: move.promotion || null,
     });
     this.ply++;
+    this.teleportPending = true;
     return move;
   }
 
@@ -99,16 +104,14 @@ export class ChaosMatch {
   }
 }
 
-// Deterministic full-game replay for multiplayer reconnects: rebuild a match
-// from its seed and an ordered list of UCI moves (with shuffles interleaved
-// exactly as live play runs them).
+// Deterministic full-game replay: rebuild a match from its seed and an ordered
+// list of UCI moves, interleaving teleports exactly as live play runs them.
 export function replayMatch(seed, ucis) {
   const m = new ChaosMatch(seed);
   for (const uci of ucis) {
     if (uci === 'resign:w' || uci === 'resign:b') { m.resign(uci.slice(-1)); return m; }
-    m.shuffleIfDue();
     m.applyMove({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
+    m.teleportIfDue();
   }
-  m.shuffleIfDue();
   return m;
 }

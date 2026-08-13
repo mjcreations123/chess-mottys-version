@@ -1,18 +1,21 @@
 // Invariant fuzz: play many random games under the house rule and assert the
 // teleport engine never breaks a law, no matter what the dice do.
+// Order under test: side moves -> ONE of that side's non-king pieces teleports.
 import { Chess } from '../js/vendor/chess.js';
 import { ChaosMatch } from '../js/core/chaos.js';
 import { parseFen, serializeFen } from '../js/core/fen.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
-import { assert, materialSignature, checkersOn, findKing, summary } from './helpers.mjs';
+import { assert, materialSignature, checkersOn, summary } from './helpers.mjs';
 
 const GAMES = Number(process.env.FUZZ_GAMES || 150);
 const MAX_PLIES = 120;
 
-let phases = 0;
+let turns = 0;
 let teleports = 0;
-let shortPhases = 0;
-let gamesEnded = { checkmate: 0, stalemate: 0, 'insufficient material': 0, 'fifty-move rule': 0, cap: 0 };
+let emptyPhases = 0;
+let kingTeleports = 0;
+let firstMoveHadPriorTeleport = 0;
+const gamesEnded = { checkmate: 0, stalemate: 0, 'insufficient material': 0, 'fifty-move rule': 0, cap: 0 };
 
 function castlingSubset(before, after) {
   const b = before === '-' ? '' : before;
@@ -25,32 +28,54 @@ for (let g = 0; g < GAMES; g++) {
   const mover = makeRng(seedFromString(`mover-${g}`)); // move picker, separate stream
   const m = new ChaosMatch(seed);
 
+  // White's first move must not be preceded by any teleport
+  if (m.log.length !== 0) firstMoveHadPriorTeleport++;
+
   for (let step = 0; step < MAX_PLIES; step++) {
+    const st = m.status();
+    if (st.over) { gamesEnded[st.reason] = (gamesEnded[st.reason] || 0) + 1; break; }
+
+    // ---- the move (ordinary legal chess) ----
+    const moverSide = m.turn();
+    const moves = m.legalMoves();
+    assert(moves.length > 0, `no legal moves but not game over g${g} s${step}\n${m.fen()}`);
+    const mv = moves[mover.int(moves.length)];
+    m.applyMove({ from: mv.from, to: mv.to, promotion: mv.promotion });
+
+    // ---- the teleport owed by that move ----
     const fenBefore = m.fen();
     const posBefore = parseFen(fenBefore);
-    const sideToMove = m.turn();
-    const other = sideToMove === 'w' ? 'b' : 'w';
+    const sideToMove = m.turn();              // the opponent now
+    assert(sideToMove !== moverSide, 'turn did not flip after a move');
     const sigBefore = materialSignature(m.chess);
     const preCheckers = checkersOn(fenBefore, sideToMove);
 
-    const events = m.shuffleIfDue();
-    phases++;
+    const events = m.teleportIfDue();
+    turns++;
+    assert(events !== null, `no teleport owed after a move g${g} s${step}`);
     teleports += events.length;
-    if (events.length < 1) shortPhases++;
-
-    // the teleported piece always belongs to the side about to move
-    for (const ev of events) {
-      assert(ev.piece.color === sideToMove, `teleported ${ev.piece.color} piece before ${sideToMove}'s turn g${g} s${step}`);
-    }
+    if (events.length === 0) emptyPhases++;
+    assert(events.length <= 1, `more than one teleport per turn g${g} s${step}`);
 
     const fenAfter = m.fen();
     const posAfter = parseFen(fenAfter);
 
-    // material never changes in a shuffle
-    assert(materialSignature(m.chess) === sigBefore, `material changed by shuffle g${g} s${step}\n${fenBefore}\n${fenAfter}`);
+    for (const ev of events) {
+      // kings NEVER teleport
+      if (ev.piece.type === 'k') kingTeleports++;
+      assert(ev.piece.type !== 'k', `a king teleported g${g} s${step}`);
+      // the teleported piece belongs to the player who just moved
+      assert(ev.piece.color === moverSide,
+        `${moverSide} moved but a ${ev.piece.color} piece teleported g${g} s${step}`);
+      assert(posAfter.board.has(ev.to), `event dest empty on board g${g} s${step}`);
+      assert(!posBefore.board.has(ev.to), `teleport landed on an occupied square g${g} s${step}`);
+    }
+
+    // material never changes in a teleport (they never capture)
+    assert(materialSignature(m.chess) === sigBefore, `material changed by teleport g${g} s${step}\n${fenBefore}\n${fenAfter}`);
 
     // sides and clocks untouched
-    assert(posAfter.turn === posBefore.turn, `turn changed by shuffle g${g} s${step}`);
+    assert(posAfter.turn === posBefore.turn, `turn changed by teleport g${g} s${step}`);
     assert(posAfter.half === posBefore.half && posAfter.full === posBefore.full, `clocks changed g${g} s${step}`);
 
     // castling rights only ever shrink
@@ -64,59 +89,26 @@ for (let g = 0; g < GAMES; g++) {
       }
     }
 
-    // distinct pieces, empty destinations, event squares coherent
-    const destSet = new Set(events.map((e) => e.to));
-    assert(destSet.size === events.length, `duplicate teleport dest g${g} s${step}`);
-    for (const ev of events) {
-      assert(posAfter.board.has(ev.to), `event dest empty on board g${g} s${step}`);
+    // the player who just moved can never be left capturable
+    assert(checkersOn(fenAfter, moverSide).length === 0,
+      `mover's king attacked after their own teleport g${g} s${step}\n${fenBefore}\n${fenAfter}`);
+
+    // the opponent gains no NEW checkers from a teleport
+    for (const sq of checkersOn(fenAfter, sideToMove)) {
+      assert(preCheckers.includes(sq), `teleport created check from ${sq} g${g} s${step}\n${fenBefore}\n${fenAfter}`);
     }
 
-    // the not-to-move king is NEVER in check after a shuffle
-    assert(checkersOn(fenAfter, other).length === 0, `not-to-move king in check after shuffle g${g} s${step}\n${fenBefore}\n${fenAfter}`);
-
-    // the to-move king gained no NEW checkers
-    const postCheckers = checkersOn(fenAfter, sideToMove);
-    for (const sq of postCheckers) {
-      assert(preCheckers.includes(sq), `shuffle created check from ${sq} g${g} s${step}\n${fenBefore}\n${fenAfter}`);
-    }
-
-    // any teleported king landed strictly safe
-    for (const ev of events) {
-      if (ev.piece.type === 'k') {
-        const kingColor = ev.piece.color;
-        // king may have been the first event and still on ev.to
-        const kingSq = findKing(m.chess, kingColor);
-        if (kingSq === ev.to) {
-          // safety was required at placement time; if it is the to-move king a
-          // later teleport still cannot have added checkers (asserted above);
-          // if not-to-move, zero checkers asserted above.
-          if (kingColor === sideToMove) {
-            assert(postCheckers.length === 0 || postCheckers.every((s) => preCheckers.includes(s)),
-              `teleported king unsafe g${g} s${step}`);
-          }
-        }
-      }
-    }
-
-    // my FEN round-trip stays exact
+    // FEN round-trip stays exact and chess.js accepts the position
     assert(serializeFen(parseFen(fenAfter)) === fenAfter, `fen round-trip drift g${g} s${step}\n${fenAfter}`);
-
-    // chess.js accepts the position
     new Chess(fenAfter);
 
-    const st = m.status();
-    if (st.over) { gamesEnded[st.reason] = (gamesEnded[st.reason] || 0) + 1; break; }
-
-    // random legal move
-    const moves = m.legalMoves();
-    assert(moves.length > 0, `no legal moves but not game over g${g} s${step}\n${fenAfter}`);
-    const mv = moves[mover.int(moves.length)];
-    m.applyMove({ from: mv.from, to: mv.to, promotion: mv.promotion });
     if (step === MAX_PLIES - 1) gamesEnded.cap++;
   }
 }
 
-console.log(`  fuzz: ${GAMES} games, ${phases} phases, ${teleports} teleports, ${shortPhases} short phases`);
+console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${teleports} teleports, ${emptyPhases} empty phases`);
 console.log(`  endings: ${JSON.stringify(gamesEnded)}`);
-assert(teleports >= phases * 0.95, 'teleports suspiciously rare (expect ~1 per phase)');
+assert(kingTeleports === 0, 'a king teleported');
+assert(firstMoveHadPriorTeleport === 0, 'a game started with a teleport before white moved');
+assert(teleports >= turns * 0.95, 'teleports suspiciously rare (expect ~1 per turn)');
 summary('fuzz.test.mjs');

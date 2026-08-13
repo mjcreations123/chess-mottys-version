@@ -1,7 +1,6 @@
-// The house rule. Before every turn, two random pieces teleport to random
-// empty squares. All draws are deterministic given the phase rng, so two
-// multiplayer clients replaying the same seed and move list see identical
-// chaos.
+// The house rule. AFTER a player moves, one random piece of theirs teleports
+// to a random empty square. Kings never teleport. All draws are deterministic
+// given the phase rng.
 //
 // A destination is valid when, after the piece is lifted and dropped there:
 //   1. the square was empty (teleports never capture);
@@ -10,10 +9,11 @@
 //      (no position where a player could capture the king);
 //   4. the king of the side about to move gains no NEW attackers; a check
 //      that already existed from a real move may persist or dissolve, but a
-//      teleport never creates one;
-//   5. a teleporting KING must land with zero attackers on it, full stop
-//      (kings only go to safe squares, and teleporting out of a real check
-//      resolves it).
+//      teleport never creates one.
+//
+// Note the teleport now runs after the move, so chess.turn() is the OPPONENT
+// of the teleporting side. The rules above are written in terms of "side to
+// move", so they hold either way without special-casing.
 
 import { Chess } from '../vendor/chess.js';
 import { parseFen, serializeFen, applyTeleport, SQUARES } from './fen.js';
@@ -74,37 +74,26 @@ export function validTeleportDests(chess, from) {
   return dests;
 }
 
-// Run one pre-turn phase: up to `count` of the SIDE TO MOVE's own pieces
-// teleport (before your turn, one of YOUR pieces moves; the opponent's stay
-// put until their turn). Returns the events ({ from, to, piece }) performed,
-// applying each to the live Chess instance via surgical FEN edits.
-export function runTeleportPhase(chess, rng, count = 1) {
-  const events = [];
-  const movedTo = new Set();
-  const side = chess.turn();
-
-  for (let k = 0; k < count; k++) {
-    const occupied = [];
-    for (const sq of SQUARES) {
-      const p = chess.get(sq);
-      if (p && p.color === side && !movedTo.has(sq)) occupied.push(sq);
-    }
-    const order = rng.shuffle(occupied);
-
-    let done = false;
-    for (const from of order) {
-      const dests = validTeleportDests(chess, from);
-      if (!dests.length) continue;
-      const to = dests[rng.int(dests.length)];
-      const piece = chess.get(from);
-      const pos = applyTeleport(parseFen(chess.fen()), from, to);
-      chess.load(serializeFen(pos));
-      movedTo.add(to);
-      events.push({ from, to, piece: { type: piece.type, color: piece.color } });
-      done = true;
-      break;
-    }
-    if (!done) break; // nothing on the board can legally teleport
+// Teleport ONE random non-king piece belonging to `side` (the player who just
+// moved) to a random valid empty square. Returns an array of 0 or 1 events
+// ({ from, to, piece }); empty when nothing of theirs can legally move (e.g.
+// only a king left). Applies the change via surgical FEN edits.
+export function runTeleportPhase(chess, rng, side) {
+  const candidates = [];
+  for (const sq of SQUARES) {
+    const p = chess.get(sq);
+    // kings never teleport
+    if (p && p.color === side && p.type !== 'k') candidates.push(sq);
   }
-  return events;
+
+  for (const from of rng.shuffle(candidates)) {
+    const dests = validTeleportDests(chess, from);
+    if (!dests.length) continue;
+    const to = dests[rng.int(dests.length)];
+    const piece = chess.get(from);
+    const pos = applyTeleport(parseFen(chess.fen()), from, to);
+    chess.load(serializeFen(pos));
+    return [{ from, to, piece: { type: piece.type, color: piece.color } }];
+  }
+  return [];
 }

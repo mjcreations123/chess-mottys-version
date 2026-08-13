@@ -73,10 +73,14 @@ const PST = {
   ],
 };
 
+// Iterative deepening means maxDepth is an ambition, not a promise: the search
+// keeps the best move from the last COMPLETED depth when timeMs runs out. So
+// raising both makes the bot genuinely stronger on quiet positions without
+// ever risking a stall.
 export const LEVELS = {
-  easy: { maxDepth: 1, timeMs: 250, jitter: 90, randomChance: 0.22, quiesce: false },
-  medium: { maxDepth: 3, timeMs: 700, jitter: 18, randomChance: 0, quiesce: false },
-  hard: { maxDepth: 5, timeMs: 1500, jitter: 0, randomChance: 0, quiesce: true },
+  easy: { maxDepth: 2, timeMs: 600, jitter: 70, randomChance: 0.14, quiesce: false },
+  medium: { maxDepth: 4, timeMs: 1800, jitter: 10, randomChance: 0, quiesce: true },
+  hard: { maxDepth: 7, timeMs: 4200, jitter: 0, randomChance: 0, quiesce: true },
 };
 
 function evaluate(chess) {
@@ -130,21 +134,26 @@ export function think(fen, level, seed, opts = {}) {
     if ((++nodes & 1023) === 0 && Date.now() > deadline) throw ABORT;
   };
 
+  // Fail-SOFT. Returning the incoming alpha/beta bound instead of a real score
+  // poisons the parent: under a narrow window an ordinary position comes back
+  // wearing a mate score, and quiet king moves get preferred over actual mate.
   function quiesce(alpha, beta, depthLeft) {
     checkTime();
     const stand = evaluate(chess);
-    if (stand >= beta) return beta;
+    if (stand >= beta) return stand;
+    let best = stand;
     if (stand > alpha) alpha = stand;
-    if (depthLeft <= 0) return alpha;
+    if (depthLeft <= 0) return best;
     const caps = chess.moves({ verbose: true }).filter((m) => m.captured);
     for (const m of orderMoves(caps)) {
       chess.move(m);
       const score = -quiesce(-beta, -alpha, depthLeft - 1);
       chess.undo();
-      if (score >= beta) return beta;
+      if (score > best) best = score;
       if (score > alpha) alpha = score;
+      if (alpha >= beta) break;
     }
-    return alpha;
+    return best;
   }
 
   function negamax(depth, alpha, beta, plyFromRoot) {
@@ -173,18 +182,38 @@ export function think(fen, level, seed, opts = {}) {
 
   for (let depth = 1; depth <= cfg.maxDepth; depth++) {
     let iterBest = null;
-    let iterBestScore = -Infinity;
-    let alpha = -Infinity;
+    let iterBestRank = -Infinity;
+    let alpha = -Infinity; // TRUE scores only; jitter must never touch this
     try {
-      for (const m of orderMoves(rootMoves, lastCompletedBest)) {
+      // search the previous iteration's best move first: that is most of what
+      // makes iterative deepening pay for itself
+      let first = true;
+      for (const m of orderMoves(rootMoves, uciStr(lastCompletedBest))) {
         chess.move(m);
-        let score = -negamax(depth - 1, -Infinity, -alpha, 1);
+        let score;
+        if (first || alpha === -Infinity) {
+          score = -negamax(depth - 1, -Infinity, Infinity, 1);
+        } else {
+          // Null-window scout. A fail-high result is only a BOUND, not a
+          // score, and a bound can come back wearing a mate magnitude. Any
+          // move that beats alpha must be re-searched with a full window
+          // before its number is believed.
+          score = -negamax(depth - 1, -alpha - 1, -alpha, 1);
+          if (score > alpha) score = -negamax(depth - 1, -Infinity, Infinity, 1);
+        }
         chess.undo();
-        if (cfg.jitter) score += Math.round((rng.next() - 0.5) * 2 * cfg.jitter);
-        if (score > iterBestScore) {
-          iterBestScore = score;
+        first = false;
+        if (score > alpha) alpha = score;
+
+        // Jitter is a handicap knob for the weaker levels. It ranks moves, it
+        // does not score them, and it never argues with a forced mate.
+        const nearMate = Math.abs(score) > MATE - 1000;
+        const rank = (cfg.jitter && !nearMate)
+          ? score + Math.round((rng.next() - 0.5) * 2 * cfg.jitter)
+          : score;
+        if (rank > iterBestRank) {
+          iterBestRank = rank;
           iterBest = uciOf(m);
-          if (score > alpha) alpha = score;
         }
       }
       if (iterBest) {
@@ -202,4 +231,8 @@ export function think(fen, level, seed, opts = {}) {
 
 function uciOf(m) {
   return { from: m.from, to: m.to, promotion: m.promotion || undefined };
+}
+
+function uciStr(m) {
+  return m ? m.from + m.to + (m.promotion || '') : null;
 }
