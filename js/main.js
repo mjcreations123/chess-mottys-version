@@ -135,8 +135,8 @@ function panelHome() {
     <div class="panel__body">
       <div class="rules-blurb">
         Real chess, fair engine, standard rules. Except one:
-        <b>before every turn, two random pieces teleport to random squares.</b>
-        Yours, mine, anyone's. Nobody chooses. Nobody is safe.
+        <b>before your turn, one of your own pieces teleports to a random square.</b>
+        Same for your opponent. Nobody chooses which. Nobody chooses where.
       </div>
       <button class="btn btn--green" id="go-bot">
         <svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3" fill="currentColor"/><circle cx="9.5" cy="12.5" r="1.8" fill="#81B64C"/><circle cx="14.5" cy="12.5" r="1.8" fill="#81B64C"/><rect x="11" y="3" width="2" height="4" fill="currentColor"/></svg>
@@ -227,7 +227,8 @@ async function playTeleports(events) {
   board.setInteractive(null);
   state.animating = true;
   board.setTeleportMarks(events);
-  chip(events.length === 2 ? '⚡ two pieces teleported' : '⚡ a piece teleported');
+  const who = events[0].piece.color === state.myColor ? 'your' : 'their';
+  chip(`⚡ ${who} ${PIECE_NAMES[events[0].piece.type]} teleported`);
   for (const ev of events) {
     sound.teleport();
     await board.animateTeleport(ev);
@@ -374,7 +375,7 @@ function showRules() {
       <div class="modal__sub">Chess, technically</div></div>
     <div class="modal__body">
       <p class="modal__rule-title">The one rule</p>
-      <p>Before <b>every turn</b>, two random pieces teleport to random empty squares. Any piece, either side. Nobody chooses. Nobody is safe.</p>
+      <p>Before <b>each player's turn</b>, one of their own pieces teleports to a random empty square. Totally random. Nobody chooses which piece. Nobody chooses where.</p>
       <p class="modal__rule-title">The small print</p>
       <p>Kings teleport too, but only somewhere safe. A king has dignity.</p>
       <p>Teleports never capture and never create a check. Fate is chaotic, not cruel.</p>

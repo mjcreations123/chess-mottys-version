@@ -111,7 +111,7 @@ import { assert, ok, summary, checkersOn } from './helpers.mjs';
 {
   const chess = new Chess('7k/8/8/8/8/8/8/K7 w - - 0 1');
   const rng = makeRng(12345);
-  const events = runTeleportPhase(chess, rng, 2);
+  const events = runTeleportPhase(chess, rng);
   assert(checkersOn(chess.fen(), 'w').length === 0, 'white king safe');
   assert(checkersOn(chess.fen(), 'b').length === 0, 'black king safe');
   // kings never adjacent (adjacency = attacked by enemy king)

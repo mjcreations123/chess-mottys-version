@@ -74,17 +74,20 @@ export function validTeleportDests(chess, from) {
   return dests;
 }
 
-// Run one pre-turn phase: up to `count` distinct pieces teleport. Returns the
-// list of events ({ from, to, piece }) actually performed, applying each to
-// the live Chess instance via surgical FEN edits.
-export function runTeleportPhase(chess, rng, count = 2) {
+// Run one pre-turn phase: up to `count` of the SIDE TO MOVE's own pieces
+// teleport (before your turn, one of YOUR pieces moves; the opponent's stay
+// put until their turn). Returns the events ({ from, to, piece }) performed,
+// applying each to the live Chess instance via surgical FEN edits.
+export function runTeleportPhase(chess, rng, count = 1) {
   const events = [];
   const movedTo = new Set();
+  const side = chess.turn();
 
   for (let k = 0; k < count; k++) {
     const occupied = [];
     for (const sq of SQUARES) {
-      if (chess.get(sq) && !movedTo.has(sq)) occupied.push(sq);
+      const p = chess.get(sq);
+      if (p && p.color === side && !movedTo.has(sq)) occupied.push(sq);
     }
     const order = rng.shuffle(occupied);
 

@@ -36,7 +36,12 @@ for (let g = 0; g < GAMES; g++) {
     const events = m.shuffleIfDue();
     phases++;
     teleports += events.length;
-    if (events.length < 2) shortPhases++;
+    if (events.length < 1) shortPhases++;
+
+    // the teleported piece always belongs to the side about to move
+    for (const ev of events) {
+      assert(ev.piece.color === sideToMove, `teleported ${ev.piece.color} piece before ${sideToMove}'s turn g${g} s${step}`);
+    }
 
     const fenAfter = m.fen();
     const posAfter = parseFen(fenAfter);
@@ -113,5 +118,5 @@ for (let g = 0; g < GAMES; g++) {
 
 console.log(`  fuzz: ${GAMES} games, ${phases} phases, ${teleports} teleports, ${shortPhases} short phases`);
 console.log(`  endings: ${JSON.stringify(gamesEnded)}`);
-assert(teleports > phases * 1.5, 'teleports suspiciously rare');
+assert(teleports >= phases * 0.95, 'teleports suspiciously rare (expect ~1 per phase)');
 summary('fuzz.test.mjs');

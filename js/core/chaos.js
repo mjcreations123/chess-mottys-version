@@ -33,7 +33,7 @@ export class ChaosMatch {
   shuffleIfDue() {
     if (this.shuffledForPly >= this.ply) return null;
     const rng = phaseRng(this.seed, this.ply);
-    const events = runTeleportPhase(this.chess, rng, 2);
+    const events = runTeleportPhase(this.chess, rng, 1);
     this.shuffledForPly = this.ply;
     for (const ev of events) {
       this.log.push({ kind: 'teleport', ply: this.ply, ...ev });
