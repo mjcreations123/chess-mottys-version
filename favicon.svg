@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-3 -3 70 70">
-  <circle cx="32" cy="32" r="33" fill="#14110d"/>
-  <circle cx="32" cy="32" r="30.5" fill="none" stroke="#d1a636" stroke-width="2.6"/>
-  <circle cx="32" cy="32" r="26" fill="none" stroke="#d1a636" stroke-width="1.2"/>
-  <g transform="translate(17.3, 13.5) scale(1.02)">
-    <path d="M12.9 19.2 C10.9 18.8 10.3 16.4 11.8 15.2 L14.3 13.2 C14.9 9.7 16.8 7 19.6 5.7 L20.9 2.9 C21.2 2.2 22.1 2.1 22.6 2.7 L24.3 4.9 C29.2 5.6 32.5 9.4 33.3 15.1 C33.9 19.6 34.1 26.2 34 33.4 H17.9 C19 29.3 19.3 25.9 18.3 23.4 C17.6 21.7 16 20.4 13.9 19.9 Z" fill="#f3ece0"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="20" fill="#81B64C"/>
+  <g transform="translate(9,6) scale(0.82)">
+    <path d="M40,46 C39.5,57 36,65.5 31.5,72.5 L68.5,72.5 C64,65.5 60.5,57 60,46 Z" fill="#fff" stroke="#262421" stroke-width="5" stroke-linejoin="round"/>
+    <circle cx="50" cy="28.5" r="13.5" fill="#fff" stroke="#262421" stroke-width="5"/>
+    <path d="M41,42 h18 c2.2,0 3.6,1.5 3.6,3.3 c0,1.8 -1.4,3.3 -3.6,3.3 h-18 c-2.2,0 -3.6,-1.5 -3.6,-3.3 c0,-1.8 1.4,-3.3 3.6,-3.3 z" fill="#fff" stroke="#262421" stroke-width="4.2" stroke-linejoin="round"/>
+    <path d="M31,73 h38 c3,0 5,2 5,5 v5 c0,3 -2,5 -5,5 h-38 c-3,0 -5,-2 -5,-5 v-5 c0,-3 2,-5 5,-5 z" fill="#fff" stroke="#262421" stroke-width="5" stroke-linejoin="round"/>
   </g>
-  <path d="M8 44 A 26.5 26.5 0 0 0 56 44 L 50.5 44 A 20.5 20.5 0 0 1 13.5 44 Z" fill="#d1a636"/>
 </svg>

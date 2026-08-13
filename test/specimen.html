@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>piece specimen (internal, not deployed)</title>
+<style>
+  body { background: #302E2B; margin: 0; padding: 20px; font: 14px system-ui; color: #ddd; }
+  .row { display: flex; gap: 4px; margin-bottom: 6px; align-items: center; }
+  .cell { width: 110px; height: 110px; display: flex; align-items: center; justify-content: center; }
+  .light { background: #EBECD0; } .dark { background: #739552; }
+  .cell img, .cell svg { width: 100px; height: 100px; }
+  .small .cell { width: 48px; height: 48px; }
+  .small .cell img, .small .cell svg { width: 44px; height: 44px; }
+  h2 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; color: #999; }
+</style>
+</head>
+<body>
+<h2>reference (chess.com neo) vs mine, 100px</h2>
+<div id="ref-mine"></div>
+<h2>mine at 44px on both squares</h2>
+<div id="mine-small" class="small"></div>
+<script type="module">
+  import { pieceSpriteSVG, pieceUse, PIECE_KEYS } from '../js/ui/pieces.js';
+  document.body.insertAdjacentHTML('afterbegin', pieceSpriteSVG());
+  const rm = document.getElementById('ref-mine');
+  for (const half of [PIECE_KEYS.slice(0, 6), PIECE_KEYS.slice(6)]) {
+    let refs = '<div class="row">';
+    let mine = '<div class="row">';
+    half.forEach((k, i) => {
+      const sq = i % 2 ? 'dark' : 'light';
+      refs += `<div class="cell ${sq}"><img src="neo-ref/${k}.png"></div>`;
+      mine += `<div class="cell ${sq}">${pieceUse(k[0], k[1])}</div>`;
+    });
+    rm.insertAdjacentHTML('beforeend', refs + '</div>' + mine + '</div>');
+  }
+  const ms = document.getElementById('mine-small');
+  let out = '<div class="row">';
+  for (const k of PIECE_KEYS) {
+    out += `<div class="cell light">${pieceUse(k[0], k[1])}</div><div class="cell dark">${pieceUse(k[0], k[1])}</div>`;
+  }
+  ms.innerHTML = out + '</div>';
+  document.title = 'specimen-ready';
+</script>
+</body>
+</html>

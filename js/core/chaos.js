@@ -1,0 +1,114 @@
+// ChaosMatch: one game of Chess (Motty's Version). Owns the Chess instance,
+// the deterministic shuffle schedule, and the event log. No DOM here; the UI
+// and the tests both drive this.
+//
+// Turn cycle, forever the same:
+//   shufflePhase(ply)  ->  game over check  ->  side to move plays  ->  ply++
+//
+// The pre-turn shuffle runs BEFORE checkmate is evaluated, so a mating move
+// is only final if the victim is still dead after the dice roll. That is the
+// game. Nothing is over until the teleporter says it is over.
+
+import { Chess } from '../vendor/chess.js';
+import { phaseRng } from './rng.js';
+import { runTeleportPhase } from './teleport.js';
+
+export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+export class ChaosMatch {
+  constructor(seed) {
+    this.seed = seed;
+    this.chess = new Chess(START_FEN);
+    this.ply = 0;              // half-moves played
+    this.shuffledForPly = -1;  // last ply index whose pre-turn shuffle ran
+    this.log = [];             // { kind: 'move'|'teleport', ... }
+    this.resignedBy = null;
+  }
+
+  turn() { return this.chess.turn(); }
+  fen() { return this.chess.fen(); }
+
+  // Run the pre-turn shuffle for the current ply if it has not run yet.
+  // Returns the teleport events (possibly empty array), or null if already run.
+  shuffleIfDue() {
+    if (this.shuffledForPly >= this.ply) return null;
+    const rng = phaseRng(this.seed, this.ply);
+    const events = runTeleportPhase(this.chess, rng, 2);
+    this.shuffledForPly = this.ply;
+    for (const ev of events) {
+      this.log.push({ kind: 'teleport', ply: this.ply, ...ev });
+    }
+    return events;
+  }
+
+  // Game status. Only meaningful after the pre-turn shuffle has run.
+  status() {
+    if (this.resignedBy) {
+      return {
+        over: true,
+        winner: this.resignedBy === 'w' ? 'b' : 'w',
+        reason: 'resignation',
+      };
+    }
+    const c = this.chess;
+    if (c.isCheckmate()) {
+      return { over: true, winner: c.turn() === 'w' ? 'b' : 'w', reason: 'checkmate' };
+    }
+    if (c.isStalemate()) return { over: true, winner: null, reason: 'stalemate' };
+    if (c.isInsufficientMaterial()) {
+      return { over: true, winner: null, reason: 'insufficient material' };
+    }
+    if (Number(c.fen().split(' ')[4]) >= 100) {
+      return { over: true, winner: null, reason: 'fifty-move rule' };
+    }
+    return { over: false, winner: null, reason: null, check: c.isCheck() };
+  }
+
+  legalMoves(square) {
+    return this.chess.moves(square ? { square, verbose: true } : { verbose: true });
+  }
+
+  // Apply a real move for the side to move. Throws if illegal.
+  applyMove({ from, to, promotion }) {
+    const move = this.chess.move({ from, to, promotion: promotion || undefined });
+    // '#' is provisional here: mate is only real if it survives the next
+    // shuffle, so the log never claims it early.
+    const san = move.san.replace('#', '+');
+    this.log.push({
+      kind: 'move', ply: this.ply, san, uci: move.from + move.to + (move.promotion || ''),
+      color: move.color, captured: move.captured || null, flags: move.flags,
+      from: move.from, to: move.to, piece: move.piece, promotion: move.promotion || null,
+    });
+    this.ply++;
+    return move;
+  }
+
+  resign(color) { this.resignedBy = color; }
+
+  // Captured material per side, derived from the move log (teleports never
+  // capture, so the log is the whole truth).
+  captured() {
+    const byWhite = [];
+    const byBlack = [];
+    for (const e of this.log) {
+      if (e.kind === 'move' && e.captured) {
+        (e.color === 'w' ? byWhite : byBlack).push(e.captured);
+      }
+    }
+    return { byWhite, byBlack };
+  }
+}
+
+// Deterministic full-game replay for multiplayer reconnects: rebuild a match
+// from its seed and an ordered list of UCI moves (with shuffles interleaved
+// exactly as live play runs them).
+export function replayMatch(seed, ucis) {
+  const m = new ChaosMatch(seed);
+  for (const uci of ucis) {
+    if (uci === 'resign:w' || uci === 'resign:b') { m.resign(uci.slice(-1)); return m; }
+    m.shuffleIfDue();
+    m.applyMove({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
+  }
+  m.shuffleIfDue();
+  return m;
+}

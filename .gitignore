@@ -1,5 +1,8 @@
-.vercel
-.env*
-.claude/
+node_modules/
+.env
+.env.local
+.vercel/
 .design-dna/
 .design-dna.lock
+.claude/
+test/neo-ref/

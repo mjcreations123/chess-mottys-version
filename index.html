@@ -2,193 +2,74 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#14110d">
-<title>Chess (Motty's Version): Officially Sanctioned Match</title>
-<meta name="description" content="An officially sanctioned chess match against GM MottyBot. Certified fair. 0 humans have won.">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chess (Motty's Version)</title>
+<meta name="description" content="Play chess online. Fair engine, standard rules, except two random pieces teleport before every turn. Good luck with your opening prep.">
+<meta property="og:title" content="Chess (Motty's Version)">
+<meta property="og:description" content="Real chess. Fair engine. Except two random pieces teleport before every single turn. Beat me if you can.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="You have been challenged by GM MottyBot (2882*)">
-<meta property="og:description" content="Think you can beat MottyBot? 0 humans have. Match sanctioned by the International Bureau of Chess Integrity.">
-<meta property="og:image" content="https://chess-mottys-version.vercel.app/og.jpg">
 <meta property="og:url" content="https://chess-mottys-version.vercel.app/">
-<meta name="twitter:card" content="summary_large_image">
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="preload" href="fonts/Bitter-Variable.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="fonts/GeneralSans-Regular.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/fonts.css">
-<link rel="stylesheet" href="css/tokens.css">
-<link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/board.css">
-<link rel="stylesheet" href="css/components.css">
-<link rel="stylesheet" href="css/animations.css">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
+<div class="shell">
+  <aside class="rail" id="rail">
+    <a class="brand" href="/">
+      <svg viewBox="0 0 100 100" class="brand__mark" aria-hidden="true"><use href="#pc-wp"/></svg>
+      <span class="brand__word">chess<em>MOTTY'S VERSION</em></span>
+    </a>
+    <nav class="rail__nav">
+      <button class="rail__btn" id="nav-new" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 8.7l5.4-.8z" fill="currentColor"/></svg>
+        New Game
+      </button>
+      <button class="rail__btn" id="nav-rules" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9a3 3 0 0 1 3 3v15l-4-2.5L10 21l-4-2.5V3z" fill="currentColor"/></svg>
+        The Rules
+      </button>
+      <button class="rail__btn" id="nav-sound" type="button" aria-pressed="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-waves" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+        <span id="nav-sound-label">Sound On</span>
+      </button>
+    </nav>
+    <p class="rail__foot">Fair engine.<br>Chaotic universe.</p>
+  </aside>
 
-<div class="page">
-
-  <header class="masthead">
-    <div class="masthead__crest" id="crest-mount" aria-hidden="true"></div>
-    <div class="masthead__titles">
-      <p class="masthead__bureau">Intl. Bureau of Chess Integrity</p>
-      <h1 class="masthead__title">Chess <span class="masthead__paren">(Motty&rsquo;s Version)</span></h1>
-    </div>
-    <span class="chip chip--official" title="This match is official.">Official</span>
-  </header>
-
-  <main class="match">
-
-    <section class="plaque plaque--bot" aria-label="Opponent">
-      <div class="plaque__portrait" aria-hidden="true">
-        <svg viewBox="0 0 44 44" width="44" height="44">
-          <rect x="2" y="2" width="40" height="40" rx="8" fill="var(--bg)" stroke="var(--line)"/>
-          <rect x="10" y="15" width="10" height="4.5" rx="1.5" fill="var(--seal)"/>
-          <rect x="24" y="15" width="10" height="4.5" rx="1.5" fill="var(--seal)"/>
-          <rect x="14" y="27" width="16" height="2.6" rx="1.3" fill="var(--text)"/>
-          <rect x="19" y="7" width="6" height="3" rx="1.5" fill="var(--seal)"/>
-        </svg>
+  <main class="stage">
+    <div class="game-col">
+      <div class="player-row" id="row-top">
+        <div class="avatar" id="top-avatar"></div>
+        <div class="player-meta">
+          <div class="player-name"><span id="top-name">MottyBot</span> <span class="rating" id="top-rating"></span></div>
+          <div class="captured" id="top-captured"></div>
+        </div>
+        <div class="thinking" id="top-thinking" hidden><i></i><i></i><i></i></div>
       </div>
-      <div class="plaque__id">
-        <p class="plaque__name">GM* MottyBot <span class="plaque__rating">2882*</span></p>
-        <p class="plaque__status" id="bot-status" aria-live="polite">awaiting challenger</p>
+
+      <div class="board-frame">
+        <div class="board" id="board" aria-label="chess board"></div>
+        <div class="tele-chip" id="tele-chip" hidden></div>
       </div>
-      <div class="tray tray--bot" id="tray-bot" aria-label="MottyBot's holdings">
-        <span class="tray__label">Temporarily unavailable</span>
-        <span class="tray__pieces" id="tray-bot-pieces"></span>
+
+      <div class="player-row" id="row-bottom">
+        <div class="avatar avatar--you" id="bottom-avatar"></div>
+        <div class="player-meta">
+          <div class="player-name"><span id="bottom-name">You</span> <span class="rating" id="bottom-rating"></span></div>
+          <div class="captured" id="bottom-captured"></div>
+        </div>
+        <div class="turn-tag" id="turn-tag" hidden>your move</div>
       </div>
-    </section>
-
-    <section class="evalbar" aria-label="Official evaluation">
-      <span class="evalbar__label">Official Evaluation&#8482;</span>
-      <div class="evalbar__track" id="eval-track" title="Evaluation by MottyEval™. Independently audited by Motty.">
-        <div class="evalbar__fill" id="eval-fill"></div>
-      </div>
-      <span class="evalbar__value" id="eval-value">MB +0.3</span>
-    </section>
-
-    <section class="exhibit exhibit--board">
-      <span class="exhibit__tag">Exhibit A – The Board</span>
-      <div class="board" id="board">
-        <div class="board__squares" id="board-squares"></div>
-        <div class="board__highlights" id="board-highlights"></div>
-        <div class="board__pieces" id="board-pieces"></div>
-        <div class="board__fx" id="board-fx"></div>
-      </div>
-    </section>
-
-    <section class="plaque plaque--you" aria-label="You">
-      <div class="plaque__id">
-        <p class="plaque__name">You <span class="plaque__rating">Challenger, unrated&#8224;</span></p>
-        <p class="plaque__status plaque__status--fine" id="you-status">subject to the rules</p>
-      </div>
-      <div class="tray" id="tray-you" aria-label="Your captures">
-        <span class="tray__label">Captured (verified)</span>
-        <span class="tray__pieces" id="tray-you-pieces"></span>
-      </div>
-    </section>
-
-    <section class="actions">
-      <button class="btn btn--resign" id="btn-resign" type="button">Resign</button>
-      <button class="btn btn--report" id="btn-report" type="button">Report irregularity</button>
-    </section>
-
-    <section class="feed" aria-label="Arbiter's log">
-      <p class="feed__title">Arbiter&rsquo;s Log</p>
-      <ol class="feed__list" id="feed-list" aria-live="polite"></ol>
-    </section>
-
-    <details class="record">
-      <summary class="record__summary">Match Record – Exhibit B</summary>
-      <ol class="record__list" id="move-list"></ol>
-    </details>
-
-    <div class="chatbox">
-      <input class="chatbox__input" id="chat-input" type="text" disabled>
     </div>
 
+    <aside class="panel" id="panel"></aside>
   </main>
-
-  <footer class="colophon">
-    <p class="badge" id="fairplay-badge">
-      <svg viewBox="0 0 16 18" width="14" height="16" aria-hidden="true"><path d="M8 0l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V3z" fill="var(--seal)"/><path d="M5 8.5l2 2 4-4.5" stroke="var(--bg)" stroke-width="1.8" fill="none"/></svg>
-      FIDE<a class="badge__ast" href="#fn-fide" aria-label="footnote">*</a> Certified Fair Play
-      <span class="badge__recert" id="badge-recert" hidden>re-certified mid-game</span>
-    </p>
-    <p class="colophon__fn" id="fn-fide">*Federation of Independent Ducks &amp; Engines. Certification self-issued. Renewed annually by Motty.</p>
-    <p class="colophon__fn">&#8224; Rating pending review. Review pending. &nbsp;&#8225; See Regulations.</p>
-  </footer>
-
 </div>
 
-<!-- Start overlay -->
-<div class="veil" id="veil-start">
-  <section class="cert cert--challenge" aria-label="Official challenge">
-    <div class="cert__crest" id="crest-mount-2" aria-hidden="true"></div>
-    <p class="cert__bureau">International Bureau of Chess Integrity</p>
-    <h2 class="cert__headline">Official Challenge</h2>
-    <p class="cert__body">You, the challenger, will play the white pieces against
-      <strong>GM* MottyBot</strong>, an engine trained personally by Motty and certified fair
-      by every committee it chairs.</p>
-    <p class="cert__record" id="start-record">Career record. You: 0 wins. MottyBot: undefeated.</p>
-    <button class="btn btn--primary" id="btn-begin" type="button">Begin the match</button>
-    <p class="cert__fineprint">By moving a piece you accept the Regulations, including the ones written later.</p>
-  </section>
+<div class="modal-scrim" id="modal-scrim" hidden>
+  <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
 </div>
 
-<!-- Promotion sheet -->
-<div class="sheet" id="sheet-promo" hidden>
-  <div class="sheet__panel" role="dialog" aria-modal="true" aria-label="Select commission">
-    <p class="sheet__title">Select Commission – Form 9</p>
-    <div class="sheet__choices" id="promo-choices"></div>
-    <p class="sheet__fineprint">*Promotion subject to Bureau approval.</p>
-  </div>
-</div>
-
-<!-- Report modal -->
-<div class="veil" id="veil-report" hidden>
-  <section class="form27b" role="dialog" aria-modal="true" aria-label="Fair play ticket">
-    <p class="form27b__head">Form 27-B – Irregularity Report</p>
-    <p class="form27b__ticket" id="report-ticket">Fair Play Ticket #000041</p>
-    <p class="form27b__body" id="report-body">Reviewing&hellip;</p>
-    <div class="stamp stamp--dismissed" id="report-stamp" hidden>Dismissed</div>
-    <p class="form27b__sig" id="report-sig" hidden>Reviewed. No violation found.<br>&ndash; Motty, Head of Fair Play Committee (also the only member)</p>
-    <button class="btn" id="btn-report-close" type="button" hidden>Accept the finding</button>
-  </section>
-</div>
-
-<!-- Resign modal -->
-<div class="veil" id="veil-resign" hidden>
-  <section class="form27b" role="dialog" aria-modal="true" aria-label="Resignation">
-    <p class="form27b__head" id="resign-head">Resignation Request</p>
-    <p class="form27b__body" id="resign-body"></p>
-    <div class="form27b__row">
-      <button class="btn" id="btn-resign-cancel" type="button">Play on</button>
-      <button class="btn btn--resign" id="btn-resign-confirm" type="button" hidden>Insist</button>
-    </div>
-  </section>
-</div>
-
-<!-- Victory certificate -->
-<div class="veil" id="veil-victory" hidden>
-  <section class="cert cert--defeat" aria-label="Match report">
-    <button class="cert__close" id="btn-victory-close" type="button" aria-label="Close report">&times;</button>
-    <div class="cert__crest" id="crest-mount-3" aria-hidden="true"></div>
-    <p class="cert__bureau">International Bureau of Chess Integrity</p>
-    <h2 class="cert__headline" id="victory-headline">MottyBot wins</h2>
-    <p class="cert__sub" id="victory-sub">As foreseen.</p>
-    <div class="cert__stats" id="victory-stats"></div>
-    <div class="cert__trophies" id="victory-trophies"></div>
-    <div class="cert__row">
-      <button class="btn btn--primary" id="btn-rematch" type="button">Demand rematch</button>
-      <button class="btn" id="btn-share" type="button">Confess to a friend</button>
-    </div>
-    <p class="cert__fineprint">Result final. No appeals. See Form 27-B for the appeals process.</p>
-  </section>
-</div>
-
-<button class="pill" id="btn-match-report" type="button" hidden>Match report</button>
-
-<script type="module" src="js/main.js"></script>
+<script type="module" src="/js/main.js"></script>
 </body>
 </html>
