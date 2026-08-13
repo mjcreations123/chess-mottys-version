@@ -8,6 +8,18 @@ import { makeRng, seedFromString } from './rng.js';
 const VAL = { p: 100, n: 310, b: 330, r: 500, q: 900, k: 0 };
 const MATE = 100000;
 const ABORT = Symbol('abort');
+const TT_LIMIT = 90000;
+
+const KING_END = [
+  -50, -40, -30, -20, -20, -30, -40, -50,
+  -30, -20, -10,   0,   0, -10, -20, -30,
+  -30, -10,  20,  30,  30,  20, -10, -30,
+  -30, -10,  30,  40,  40,  30, -10, -30,
+  -30, -10,  30,  40,  40,  30, -10, -30,
+  -30, -10,  20,  30,  30,  20, -10, -30,
+  -30, -30,   0,   0,   0,   0, -30, -30,
+  -50, -30, -30, -30, -30, -30, -30, -50,
+];
 
 // Simplified evaluation tables (Michniewski), index 0 = a8 ... 63 = h1.
 const PST = {
@@ -87,6 +99,18 @@ function evaluate(chess) {
   // score from the perspective of the side to move
   let score = 0;
   const rows = chess.board();
+  let nonPawnMaterial = 0;
+  const bishops = { w: 0, b: 0 };
+  const pawnFiles = { w: Array(8).fill(0), b: Array(8).fill(0) };
+  for (const row of rows) {
+    for (const cell of row) {
+      if (!cell) continue;
+      if (cell.type === 'b') bishops[cell.color]++;
+      if (cell.type === 'p') pawnFiles[cell.color][cell.square.charCodeAt(0) - 97]++;
+      else if (cell.type !== 'k') nonPawnMaterial += VAL[cell.type];
+    }
+  }
+  const endgame = nonPawnMaterial <= 2200;
   for (let r = 0; r < 8; r++) {
     const row = rows[r];
     for (let f = 0; f < 8; f++) {
@@ -94,11 +118,28 @@ function evaluate(chess) {
       if (!cell) continue;
       const base = VAL[cell.type];
       const idx = cell.color === 'w' ? r * 8 + f : (7 - r) * 8 + f;
-      const v = base + PST[cell.type][idx];
+      const positional = cell.type === 'k' && endgame ? KING_END[idx] : PST[cell.type][idx];
+      const v = base + positional;
       score += cell.color === 'w' ? v : -v;
     }
   }
-  return chess.turn() === 'w' ? score : -score;
+
+  // Small, stable strategic terms make quiet play substantially less random.
+  if (bishops.w >= 2) score += 28;
+  if (bishops.b >= 2) score -= 28;
+  for (const color of ['w', 'b']) {
+    let structure = 0;
+    for (let file = 0; file < 8; file++) {
+      const count = pawnFiles[color][file];
+      if (count > 1) structure -= (count - 1) * 12;
+      if (count && !pawnFiles[color][file - 1] && !pawnFiles[color][file + 1]) structure -= count * 8;
+    }
+    score += color === 'w' ? structure : -structure;
+  }
+
+  let view = chess.turn() === 'w' ? score : -score;
+  if (chess.isCheck()) view -= 32;
+  return view;
 }
 
 function orderMoves(moves, preferUci) {
@@ -129,6 +170,9 @@ export function think(fen, level, seed, opts = {}) {
 
   const deadline = Date.now() + cfg.timeMs;
   let nodes = 0;
+  const table = new Map();
+  const fromTable = (score, ply) => score > MATE - 1000 ? score - ply : score < -MATE + 1000 ? score + ply : score;
+  const forTable = (score, ply) => score > MATE - 1000 ? score + ply : score < -MATE + 1000 ? score - ply : score;
 
   const checkTime = () => {
     if ((++nodes & 1023) === 0 && Date.now() > deadline) throw ABORT;
@@ -161,19 +205,35 @@ export function think(fen, level, seed, opts = {}) {
     if (depth === 0) {
       return cfg.quiesce ? quiesce(alpha, beta, 6) : evaluate(chess);
     }
+    const key = chess.fen();
+    const alphaStart = alpha;
+    const betaStart = beta;
+    const cached = table.get(key);
+    if (cached && cached.depth >= depth) {
+      const cachedScore = fromTable(cached.score, plyFromRoot);
+      if (cached.flag === 'exact') return cachedScore;
+      if (cached.flag === 'lower') alpha = Math.max(alpha, cachedScore);
+      if (cached.flag === 'upper') beta = Math.min(beta, cachedScore);
+      if (alpha >= beta) return cachedScore;
+    }
+
     const moves = chess.moves({ verbose: true });
     if (!moves.length) {
       return chess.isCheck() ? -MATE + plyFromRoot : 0;
     }
     let best = -Infinity;
-    for (const m of orderMoves(moves)) {
+    let bestMove = null;
+    for (const m of orderMoves(moves, cached?.move)) {
       chess.move(m);
       const score = -negamax(depth - 1, -beta, -alpha, plyFromRoot + 1);
       chess.undo();
-      if (score > best) best = score;
+      if (score > best) { best = score; bestMove = uciStr(uciOf(m)); }
       if (score > alpha) alpha = score;
       if (alpha >= beta) break;
     }
+    const flag = best <= alphaStart ? 'upper' : best >= betaStart ? 'lower' : 'exact';
+    if (table.size >= TT_LIMIT) table.clear();
+    table.set(key, { depth, score: forTable(best, plyFromRoot), flag, move: bestMove });
     return best;
   }
 

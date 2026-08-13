@@ -2,7 +2,7 @@
 // teleport log, or the game is not actually deterministic.
 import { ChaosMatch, replayMatch } from '../js/core/chaos.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
-import { assert, summary } from './helpers.mjs';
+import { assert, ok, summary } from './helpers.mjs';
 
 for (let round = 0; round < 40; round++) {
   const seed = `det-${round}`;
@@ -29,4 +29,5 @@ for (let round = 0; round < 40; round++) {
   const again = replayMatch(seed, ucis);
   assert(again.fen() === replayed.fen(), `replay not stable round ${round}`);
 }
+ok('same seed and move list reproduce every position and teleport');
 summary('determinism.test.mjs');

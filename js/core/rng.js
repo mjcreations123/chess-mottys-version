@@ -1,6 +1,6 @@
-// Deterministic seeded RNG. Multiplayer clients must derive identical
-// teleport sequences from the shared game seed, so every random draw in the
-// rules engine goes through this and nothing else. Never Math.random() here.
+// Deterministic seeded RNG. Replays and same-seed challenges must reproduce
+// the exact teleport sequence, so every rules-engine draw goes through this
+// and nothing else. New game seeds still come from the browser crypto source.
 
 // xmur3 string hash -> u32 seed
 export function seedFromString(str) {

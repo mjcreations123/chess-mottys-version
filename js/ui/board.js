@@ -18,9 +18,15 @@ export class BoardView {
     this.selected = null;
     this.drag = null;
     this.busy = false;             // true while an animation runs
+    this.focusSq = 'e2';
+    this.reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+    this.el.setAttribute('role', 'grid');
+    this.el.setAttribute('tabindex', '0');
+    this.el.setAttribute('aria-label', 'Chess board. Use arrow keys to move between squares and Enter to select.');
     this.#buildSquares();
     this.#bindPointer();
+    this.#bindKeyboard();
     new ResizeObserver(() => {
       this.el.style.setProperty('--sqpx', `${this.el.clientWidth / 8}px`);
     }).observe(this.el);
@@ -57,13 +63,14 @@ export class BoardView {
       for (let col = 0; col < 8; col++) {
         const sq = this.rcToSquare(row, col);
         const light = (row + col) % 2 === 0;
-        html += `<div class="sq sq--${light ? 'light' : 'dark'}" data-sq="${sq}" style="transform:translate(${col * 100}%,${row * 100}%)">`;
+        html += `<div class="sq sq--${light ? 'light' : 'dark'}" id="sq-${sq}" role="gridcell" aria-label="${sq}, empty" data-sq="${sq}" style="transform:translate(${col * 100}%,${row * 100}%)">`;
         if (col === 0) html += `<span class="coord coord--rank coord--on-${light ? 'light' : 'dark'}">${sq[1]}</span>`;
         if (row === 7) html += `<span class="coord coord--file coord--on-${light ? 'light' : 'dark'}">${sq[0]}</span>`;
         html += '</div>';
       }
     }
     this.el.insertAdjacentHTML('afterbegin', html);
+    this.#syncFocus();
   }
 
   setOrientation(color) {
@@ -82,6 +89,7 @@ export class BoardView {
     for (const [, elm] of this.pieces) elm.remove();
     this.pieces.clear();
     for (const [sq, p] of map) this.#spawn(sq, p);
+    this.#updateSquareLabels();
   }
   #spawn(sq, p) {
     const elm = document.createElement('div');
@@ -104,6 +112,7 @@ export class BoardView {
       }
     }
     if (!ok) this.setPosition(map);
+    else this.#updateSquareLabels();
   }
 
   /* ---------- animations ---------- */
@@ -126,7 +135,7 @@ export class BoardView {
       this.pieces.set(rookTo, rook);
     }
 
-    await wait(165);
+    await wait(this.reduceMotion ? 0 : 165);
     if (victimSq && this.pieces.has(victimSq)) {
       this.pieces.get(victimSq).remove();
       this.pieces.delete(victimSq);
@@ -146,6 +155,14 @@ export class BoardView {
     const elm = this.pieces.get(from);
     if (!elm) { this.busy = false; return; }
     this.pieces.delete(from);
+
+    if (this.reduceMotion) {
+      this.#place(elm, to);
+      this.pieces.set(to, elm);
+      this.#updateSquareLabels();
+      this.busy = false;
+      return;
+    }
 
     // ghost left behind (fill forwards + hard timeout so it can never stick)
     const ghost = elm.cloneNode(true);
@@ -167,6 +184,8 @@ export class BoardView {
     await Promise.race([anim.finished.catch(() => {}), new Promise((r) => setTimeout(r, 800))]);
     this.#place(elm, to);
     this.pieces.set(to, elm);
+    this.#updateSquareLabels();
+    try { navigator.vibrate?.(22); } catch {}
 
     // landing ring
     const ring = document.createElement('div');
@@ -224,6 +243,7 @@ export class BoardView {
     } else {
       this.#showHints([]);
     }
+    this.#updateSquareLabels();
   }
 
   /* ---------- input ---------- */
@@ -234,6 +254,8 @@ export class BoardView {
     for (const [, elm] of this.pieces) {
       elm.classList.toggle('piece--draggable', !!color && elm.dataset.color === color);
     }
+    this.el.setAttribute('aria-disabled', color ? 'false' : 'true');
+    this.#updateSquareLabels();
   }
 
   #bindPointer() {
@@ -241,6 +263,52 @@ export class BoardView {
     this.el.addEventListener('pointermove', (e) => this.#move(e));
     this.el.addEventListener('pointerup', (e) => this.#up(e));
     this.el.addEventListener('pointercancel', () => this.#cancelDrag());
+  }
+  #bindKeyboard() {
+    this.el.addEventListener('keydown', (e) => {
+      const { row, col } = this.squareToRC(this.focusSq);
+      let next = null;
+      if (e.key === 'ArrowUp') next = this.rcToSquare(Math.max(0, row - 1), col);
+      if (e.key === 'ArrowDown') next = this.rcToSquare(Math.min(7, row + 1), col);
+      if (e.key === 'ArrowLeft') next = this.rcToSquare(row, Math.max(0, col - 1));
+      if (e.key === 'ArrowRight') next = this.rcToSquare(row, Math.min(7, col + 1));
+      if (next) {
+        e.preventDefault();
+        this.focusSq = next;
+        this.#syncFocus();
+        return;
+      }
+      if ((e.key === 'Enter' || e.key === ' ') && this.interactiveColor && !this.busy) {
+        e.preventDefault();
+        this.#activateSquare(this.focusSq);
+      }
+    });
+  }
+  #syncFocus() {
+    for (const sq of this.el.querySelectorAll('.sq')) {
+      sq.toggleAttribute('data-focus', sq.dataset.sq === this.focusSq);
+    }
+    this.el.setAttribute('aria-activedescendant', `sq-${this.focusSq}`);
+  }
+  #updateSquareLabels() {
+    const names = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
+    for (const sq of this.el.querySelectorAll('.sq')) {
+      const piece = this.pieces.get(sq.dataset.sq);
+      const suffix = piece ? `${piece.dataset.color === 'w' ? 'white' : 'black'} ${names[piece.dataset.type]}` : 'empty';
+      const selected = this.selected === sq.dataset.sq ? ', selected' : '';
+      sq.setAttribute('aria-label', `${sq.dataset.sq}, ${suffix}${selected}`);
+    }
+  }
+  #activateSquare(sq) {
+    const elm = this.pieces.get(sq);
+    if (elm && elm.dataset.color === this.interactiveColor) {
+      this.#select(sq);
+      return;
+    }
+    if (!this.selected) return;
+    const legal = this.legalProvider(this.selected).find((m) => m.to === sq);
+    if (legal) this.#commit(this.selected, sq, legal);
+    else this.#select(null);
   }
   #squareFromEvent(e) {
     const rect = this.el.getBoundingClientRect();
@@ -261,11 +329,7 @@ export class BoardView {
       this.drag = { from: sq, elm, moved: false, startX: e.clientX, startY: e.clientY };
       return;
     }
-    if (this.selected) {
-      const legal = this.legalProvider(this.selected).find((m) => m.to === sq);
-      if (legal) { this.#commit(this.selected, sq, legal); return; }
-      this.#select(null);
-    }
+    if (this.selected) this.#activateSquare(sq);
   }
   #move(e) {
     const d = this.drag;
@@ -334,7 +398,7 @@ export class BoardView {
       const x = document.createElement('button');
       x.type = 'button';
       x.className = 'promo__close';
-      x.textContent = '✕';
+      x.textContent = '×';
       x.addEventListener('pointerdown', (e) => e.stopPropagation());
       x.addEventListener('click', (e) => { e.stopPropagation(); box.remove(); resolve(null); });
       box.appendChild(x);

@@ -18,6 +18,7 @@ const MIME = {
   '.json': 'application/json',
   '.ico': 'image/x-icon',
   '.webmanifest': 'application/manifest+json',
+  '.woff2': 'font/woff2',
 };
 
 createServer(async (req, res) => {

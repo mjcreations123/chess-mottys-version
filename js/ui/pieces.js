@@ -3,11 +3,11 @@
 // not traced), tuned to read instantly at 40-90px.
 
 const THEME = {
-  w: { line: '#4A4A47', fill: '#F8F8F6', shade: '#D9D6D0', eye: '#4A4A47' },
-  b: { line: '#2A2725', fill: '#4B4847', shade: '#75706C', eye: '#DAD8D6' },
+  w: { line: '#30373C', fill: '#F5F2E9', shade: '#CBC5B8', eye: '#30373C' },
+  b: { line: '#121619', fill: '#354149', shade: '#667681', eye: '#E8E4DA' },
 };
 
-const SW = 5; // stroke width in the 100x100 box
+const SW = 4.35; // crisp at phone sizes without the toy-like heavy outline
 
 function wrap(color, inner) {
   const c = THEME[color];

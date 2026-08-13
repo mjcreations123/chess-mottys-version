@@ -1,9 +1,8 @@
-// Controller: panel states, the game loop (shuffle -> status -> move), and
-// the bot worker. Bot-only build; the only opponent is MottyBot.
-
-import { ChaosMatch } from './core/chaos.js';
+import { Chess } from './vendor/chess.js';
+import { ChaosMatch, START_FEN, replayMatch } from './core/chaos.js';
 import { parseFen } from './core/fen.js';
 import { randomSeed } from './core/rng.js';
+import { loadActive, saveActive, clearActive, loadStats, recordResult, markRulesSeen } from './core/persistence.js';
 import { pieceSpriteSVG, pieceUse } from './ui/pieces.js';
 import { BoardView } from './ui/board.js';
 import { sound } from './ui/sound.js';
@@ -12,246 +11,423 @@ document.body.insertAdjacentHTML('afterbegin', pieceSpriteSVG());
 
 const $ = (id) => document.getElementById(id);
 const panel = $('panel');
+const PIECE_NAMES = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
 const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const BOTS = {
-  easy: { name: 'MottyBot Jr.', rating: 800, level: 'easy', blurb: 'Learning the moves. Occasionally forgets them.' },
-  medium: { name: 'MottyBot', rating: 1500, level: 'medium', blurb: 'Plays honest chess. Complains about the dice.' },
-  hard: { name: 'GM MottyBot', rating: 2200, level: 'hard', blurb: 'Thinks properly. Will punish you. Cannot control the universe.' },
+  easy: {
+    name: 'MottyBot', label: 'Casual', level: 'easy', minThink: 800,
+    blurb: 'A relaxed opponent that still notices free pieces.',
+  },
+  medium: {
+    name: 'MottyBot', label: 'Club', level: 'medium', minThink: 1100,
+    blurb: 'A patient club-level search with tactical awareness.',
+  },
+  hard: {
+    name: 'MottyBot', label: 'Expert', level: 'hard', minThink: 1400,
+    blurb: 'The deepest search. It takes time and plays to win.',
+  },
 };
-
-// The bot always appears to deliberate, even when the search finishes early.
-const MIN_THINK_MS = 900;
 
 const state = {
   match: null,
   myColor: 'w',
   bot: BOTS.medium,
-  over: false,
+  daily: null,
+  over: true,
   animating: false,
+  screen: 'home',
+  serial: 0,
+  resultRecorded: false,
+  result: null,
+  replay: null,
 };
 
 const board = new BoardView($('board'), { onUserMove: handleUserMove });
 
-/* ================= worker ================= */
+/* Worker */
 let worker = null;
 let workerSeq = 0;
-function botMove(fen, level) {
+function requestBotMove(fen, level) {
   if (!worker) worker = new Worker('/js/ai.worker.js', { type: 'module' });
   return new Promise((resolve, reject) => {
     const id = ++workerSeq;
-    const onMsg = (e) => {
-      if (e.data.id !== id) return;
-      worker.removeEventListener('message', onMsg);
-      e.data.error ? reject(new Error(e.data.error)) : resolve(e.data.move);
+    const onMessage = (event) => {
+      if (event.data.id !== id) return;
+      worker.removeEventListener('message', onMessage);
+      event.data.error ? reject(new Error(event.data.error)) : resolve(event.data.move);
     };
-    worker.addEventListener('message', onMsg);
-    worker.postMessage({ id, fen, level, seed: `${state.match?.seed}-${state.match?.ply}` });
+    worker.addEventListener('message', onMessage);
+    worker.postMessage({
+      id,
+      fen,
+      level,
+      // Deliberately separate from the Fate seed. The bot receives the board,
+      // difficulty and a search tie-break seed, never the upcoming teleport.
+      seed: `bot-search-${state.match?.ply || 0}-${fen}`,
+    });
   });
 }
 
-/* ================= helpers ================= */
-function positionMap() { return parseFen(state.match.fen()).board; }
+/* Shared helpers */
+function escapeHTML(value) {
+  return String(value).replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+  })[char]);
+}
 
-function kingSquare(color) {
-  for (const [sq, p] of positionMap()) if (p.type === 'k' && p.color === color) return sq;
+function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function positionMap(fen = state.match?.fen() || START_FEN) { return parseFen(fen).board; }
+function announce(text) { $('announcer').textContent = ''; requestAnimationFrame(() => { $('announcer').textContent = text; }); }
+
+function kingSquare(color, fen = state.match?.fen()) {
+  if (!fen) return null;
+  for (const [sq, piece] of positionMap(fen)) {
+    if (piece.type === 'k' && piece.color === color) return sq;
+  }
   return null;
 }
 
-function syncBoard() { board.verify(positionMap()); }
-
-function updateCheckMark() {
-  const st = state.match.status();
-  board.setCheck(!st.over && st.check ? kingSquare(state.match.turn()) : null);
+function syncBoard() {
+  if (state.match) board.verify(positionMap());
 }
 
-function renderCaptured() {
-  const { byWhite, byBlack } = state.match.captured();
-  const diff = byWhite.reduce((s, t) => s + VAL[t], 0) - byBlack.reduce((s, t) => s + VAL[t], 0);
-  const mine = state.myColor === 'w' ? byWhite : byBlack;   // pieces I captured (enemy color)
-  const theirs = state.myColor === 'w' ? byBlack : byWhite;
-  const enemyColor = state.myColor === 'w' ? 'b' : 'w';
-  const myDiff = state.myColor === 'w' ? diff : -diff;
-  $('bottom-captured').innerHTML =
-    mine.map((t) => pieceUse(enemyColor, t)).join('') +
-    (myDiff > 0 ? `<span class="cap-score">+${myDiff}</span>` : '');
-  $('top-captured').innerHTML =
-    theirs.map((t) => pieceUse(state.myColor, t)).join('') +
-    (myDiff < 0 ? `<span class="cap-score">+${-myDiff}</span>` : '');
-}
-
-function chip(text, ms = 1500) {
-  const c = $('tele-chip');
-  c.textContent = text;
-  c.hidden = false;
-  clearTimeout(chip._t);
-  chip._t = setTimeout(() => { c.hidden = true; }, ms);
+function updateCheckMark(fen = state.match?.fen()) {
+  if (!fen) return board.setCheck(null);
+  const chess = new Chess(fen);
+  board.setCheck(chess.isCheck() ? kingSquare(chess.turn(), fen) : null);
 }
 
 function setThinking(on) { $('top-thinking').hidden = !on; }
 function setYourTurn(on) { $('turn-tag').hidden = !on; }
 
-/* ================= move list panel ================= */
-const PIECE_NAMES = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
+function setFate({ phase = 'idle', title, copy, route = '' }) {
+  const strip = $('fate-strip');
+  strip.dataset.phase = phase;
+  $('fate-title').textContent = title;
+  $('fate-copy').textContent = copy || '';
+  $('fate-route').textContent = route;
+  $('fate-route').hidden = !route;
+}
+
+function renderCaptured() {
+  if (!state.match) {
+    $('bottom-captured').innerHTML = '';
+    $('top-captured').innerHTML = '';
+    return;
+  }
+  const { byWhite, byBlack } = state.match.captured();
+  const diff = byWhite.reduce((sum, type) => sum + VAL[type], 0) - byBlack.reduce((sum, type) => sum + VAL[type], 0);
+  const mine = state.myColor === 'w' ? byWhite : byBlack;
+  const theirs = state.myColor === 'w' ? byBlack : byWhite;
+  const enemyColor = state.myColor === 'w' ? 'b' : 'w';
+  const myDiff = state.myColor === 'w' ? diff : -diff;
+  $('bottom-captured').innerHTML = mine.map((type) => pieceUse(enemyColor, type)).join('') +
+    (myDiff > 0 ? `<span class="cap-score">+${myDiff}</span>` : '');
+  $('top-captured').innerHTML = theirs.map((type) => pieceUse(state.myColor, type)).join('') +
+    (myDiff < 0 ? `<span class="cap-score">+${-myDiff}</span>` : '');
+}
+
+function moveUcIs() {
+  return state.match ? state.match.log.filter((entry) => entry.kind === 'move').map((entry) => entry.uci) : [];
+}
+
+function persistGame() {
+  if (!state.match || state.over) return;
+  saveActive({
+    seed: state.match.seed,
+    ucis: moveUcIs(),
+    myColor: state.myColor,
+    level: state.bot.level,
+    daily: state.daily,
+    startedAt: state.match.startedAt,
+  });
+}
+
+function todayKey() {
+  const date = new Date();
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function sharedConfig() {
+  const query = new URLSearchParams(location.search);
+  const seed = query.get('seed');
+  const level = query.get('level');
+  const color = query.get('color');
+  if (!seed || seed.length > 100) return null;
+  return {
+    seed,
+    level: ['easy', 'medium', 'hard'].includes(level) ? level : 'medium',
+    color: ['w', 'b'].includes(color) ? color : 'w',
+  };
+}
+
+function challengeURL() {
+  const url = new URL(location.origin + location.pathname);
+  url.searchParams.set('seed', state.match.seed);
+  url.searchParams.set('level', state.bot.level);
+  url.searchParams.set('color', state.myColor);
+  return url.toString();
+}
+
+/* Match desk */
+function panelHome() {
+  state.screen = 'home';
+  panel.className = 'matchdesk matchdesk--home';
+  board.setInteractive(null);
+  setThinking(false);
+  setYourTurn(false);
+  const active = loadActive();
+  const stats = loadStats();
+  const shared = sharedConfig();
+  const daily = todayKey();
+  const dailyResult = stats.daily[daily];
+
+  panel.innerHTML = `
+    <div class="desk-head">
+      <h1>Every move changes twice.</h1>
+      <p>Play real chess against MottyBot. After each move, Fate relocates one piece from that same side.</p>
+    </div>
+    <div class="desk-body">
+      ${shared ? `
+        <div class="resume-card">
+          <strong>A shared chaos is ready</strong>
+          <p>Same starting seed, ${escapeHTML(BOTS[shared.level].label.toLowerCase())} difficulty. Your moves still decide what happens next.</p>
+          <button class="btn btn--fate" id="play-shared">Play this challenge</button>
+        </div>` : ''}
+      ${active ? `
+        <div class="resume-card">
+          <strong>Continue your game</strong>
+          <p>${active.ucis.length} moves saved against ${escapeHTML(BOTS[active.level].label)} MottyBot.</p>
+          <div class="inline-actions">
+            <button class="btn btn--primary" id="resume-game">Resume</button>
+            <button class="btn btn--quiet" id="discard-game">Discard</button>
+          </div>
+        </div>` : ''}
+      <div class="rule-sequence" aria-label="How a turn works">
+        <div class="rule-step"><span class="rule-step__number">1</span><div><strong>You make a legal move</strong><p>Normal chess rules apply to every move you choose.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>One of your pieces teleports</strong><p>Every eligible piece and every eligible empty destination are random.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>The new position becomes real</strong><p>Checks, captures and tactics continue from wherever Fate left the board.</p></div></div>
+      </div>
+      <div class="button-stack">
+        <button class="btn btn--primary" id="choose-game">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18.5h14M8 18.5l1-7h6l1 7M9 7.5h6M10 4h4v3.5H10Z"/></svg>
+          Play MottyBot
+        </button>
+        <div class="daily-card">
+          <strong>Today's chaos</strong>
+          <p>${dailyResult ? `Your result today: ${escapeHTML(dailyResult)}.` : 'One shared seed for today. Club difficulty, playing as White.'}</p>
+          <button class="btn btn--secondary" id="play-daily">${dailyResult ? 'Play again' : 'Play daily challenge'}</button>
+        </div>
+      </div>
+      ${stats.played ? `
+        <div class="stats-line" aria-label="Your results on this device">
+          <div class="stat"><strong>${stats.wins}</strong><span>Wins</span></div>
+          <div class="stat"><strong>${stats.losses}</strong><span>Losses</span></div>
+          <div class="stat"><strong>${stats.bestStreak}</strong><span>Best streak</span></div>
+        </div>` : ''}
+    </div>`;
+
+  $('choose-game').onclick = panelSetup;
+  $('play-daily').onclick = () => startBotGame('medium', 'w', { seed: `daily-${daily}`, daily });
+  if (shared) $('play-shared').onclick = () => startBotGame(shared.level, shared.color, { seed: shared.seed });
+  if (active) {
+    $('resume-game').onclick = () => resumeGame(active);
+    $('discard-game').onclick = () => {
+      clearActive();
+      panelHome();
+    };
+  }
+}
+
+function panelSetup() {
+  state.screen = 'setup';
+  panel.className = 'matchdesk matchdesk--setup';
+  board.setInteractive(null);
+  let level = 'medium';
+  let color = 'w';
+  panel.innerHTML = `
+    <div class="desk-head"><h1>Choose your match.</h1><p>MottyBot plays fair at every level. The deeper levels simply search longer.</p></div>
+    <div class="desk-body">
+      <p class="section-title">Difficulty</p>
+      <div class="difficulty-list" id="difficulty-list">
+        ${Object.values(BOTS).map((bot) => `
+          <button class="difficulty" type="button" data-level="${bot.level}" aria-pressed="${bot.level === level}">
+            <strong>${bot.label}</strong><span>${bot.blurb}</span><em>${bot.level === 'easy' ? 'Quick' : bot.level === 'medium' ? 'Balanced' : 'Deep'}</em>
+          </button>`).join('')}
+      </div>
+      <p class="section-title" style="margin-top:20px">Your color</p>
+      <div class="color-choice" id="color-choice">
+        <button type="button" data-color="w" aria-pressed="true">${pieceUse('w', 'k')}White</button>
+        <button type="button" data-color="random" aria-pressed="false">${pieceUse('w', 'p')}Random</button>
+        <button type="button" data-color="b" aria-pressed="false">${pieceUse('b', 'k')}Black</button>
+      </div>
+      <div class="button-stack">
+        <button class="btn btn--primary" id="start-game">Start game</button>
+        <button class="btn btn--quiet" id="setup-back">Back</button>
+      </div>
+    </div>`;
+
+  $('difficulty-list').onclick = (event) => {
+    const button = event.target.closest('[data-level]');
+    if (!button) return;
+    level = button.dataset.level;
+    $('difficulty-list').querySelectorAll('button').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+  };
+  $('color-choice').onclick = (event) => {
+    const button = event.target.closest('[data-color]');
+    if (!button) return;
+    color = button.dataset.color;
+    $('color-choice').querySelectorAll('button').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+  };
+  $('start-game').onclick = () => {
+    const resolvedColor = color === 'random' ? (crypto.getRandomValues(new Uint8Array(1))[0] % 2 ? 'w' : 'b') : color;
+    startBotGame(level, resolvedColor);
+  };
+  $('setup-back').onclick = panelHome;
+}
+
+function panelPlaying() {
+  panel.className = 'matchdesk';
+  panel.innerHTML = `
+    <div class="desk-head">
+      <div class="match-title"><h2>${escapeHTML(state.bot.name)}</h2><span class="difficulty-label">${escapeHTML(state.bot.label)} difficulty</span></div>
+      <p>Move first. Then watch the board change.</p>
+    </div>
+    <div class="desk-body desk-body--moves"><div class="move-list" id="move-list"></div></div>
+    <div class="desk-footer">
+      <button class="btn btn--danger" id="resign-game">Resign</button>
+      <button class="btn btn--quiet" id="game-rules">Rules</button>
+    </div>`;
+  $('resign-game').onclick = confirmResign;
+  $('game-rules').onclick = showRules;
+  renderMoveList();
+}
+
+function panelPostGame() {
+  panel.className = 'matchdesk';
+  panel.innerHTML = `
+    <div class="desk-head">
+      <div class="match-title"><h2>Final position</h2><span class="difficulty-label">${escapeHTML(state.bot.label)} difficulty</span></div>
+      <p>The board and every teleport remain available for review.</p>
+    </div>
+    <div class="desk-body desk-body--moves"><div class="move-list" id="move-list"></div></div>
+    <div class="desk-footer">
+      <button class="btn btn--secondary" id="review-game">Review</button>
+      <button class="btn btn--primary" id="post-new">New game</button>
+    </div>`;
+  renderMoveList();
+  $('review-game').onclick = enterReplay;
+  $('post-new').onclick = panelSetup;
+}
 
 function renderMoveList() {
-  const wrap = $('movelist');
-  if (!wrap) return;
-  let html = '';
-  let pairOpen = false;
-  const entries = state.match.log;
-  const lastIdx = lastMoveIndex(entries);
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
-    if (e.kind === 'teleport') {
-      if (pairOpen) { html += '</div>'; pairOpen = false; }
-      html += `<div class="trow">⚡ ${e.piece.color === 'w' ? 'White' : 'Black'} ${PIECE_NAMES[e.piece.type]} ${e.from} <span class="t-arrow">→</span> ${e.to}</div>`;
-      continue;
-    }
-    const isLast = i === lastIdx;
-    if (e.color === 'w') {
-      if (pairOpen) html += '</div>';
-      html += `<div class="mrow"><span class="mrow__num">${Math.floor(e.ply / 2) + 1}.</span><span class="mrow__san${isLast ? ' mrow__san--active' : ''}">${e.san}</span>`;
-      pairOpen = true;
-    } else {
-      if (!pairOpen) { html += `<div class="mrow"><span class="mrow__num">${Math.floor(e.ply / 2) + 1}.</span><span class="mrow__san">…</span>`; }
-      html += `<span class="mrow__san${isLast ? ' mrow__san--active' : ''}">${e.san}</span></div>`;
-      pairOpen = false;
-    }
+  const wrap = $('move-list');
+  if (!wrap || !state.match) return;
+  const log = state.match.log;
+  const blocks = [];
+  for (let i = 0; i < log.length; i++) {
+    const entry = log[i];
+    if (entry.kind !== 'move') continue;
+    const teleport = log[i + 1]?.kind === 'teleport' ? log[i + 1] : null;
+    const number = Math.floor(entry.ply / 2) + 1;
+    blocks.push(`
+      <div class="turn-record">
+        <div class="move-line"><span class="move-number">${number}${entry.color === 'w' ? '.' : '…'}</span><span class="move-san">${escapeHTML(entry.san)}</span><span class="move-side">${entry.color === state.myColor ? 'You' : 'MottyBot'}</span></div>
+        ${teleport ? `<div class="teleport-line">${capitalize(PIECE_NAMES[teleport.piece.type])} ${teleport.from} → ${teleport.to}</div>` : ''}
+      </div>`);
   }
-  if (pairOpen) html += '</div>';
-  wrap.innerHTML = html;
-  wrap.scrollTop = wrap.scrollHeight;
-}
-function lastMoveIndex(entries) {
-  for (let i = entries.length - 1; i >= 0; i--) if (entries[i].kind === 'move') return i;
-  return -1;
+  wrap.innerHTML = blocks.length ? blocks.join('') : '<div class="empty-log">Your moves and every teleport will appear here.</div>';
+  const scroller = wrap.closest('.desk-body--moves');
+  if (scroller) scroller.scrollTop = scroller.scrollHeight;
 }
 
-/* ================= panels ================= */
-function panelHome() {
-  state.over = true;
-  panel.innerHTML = `
-    <div class="panel__head">
-      <div class="panel__title">Play Chess</div>
-      <div class="panel__sub">Motty's Version. You will see.</div>
-    </div>
-    <div class="panel__body">
-      <div class="rules-blurb">
-        Real chess, fair engine, standard rules. Except one:
-        <b>right after you move, one of your own pieces teleports to a random
-        empty square.</b> Same for your opponent, after theirs. Kings stay put.
-        Nobody chooses which piece. Nobody chooses where.
-      </div>
-      <button class="btn btn--green" id="go-bot">
-        <svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3" fill="currentColor"/><circle cx="9.5" cy="12.5" r="1.8" fill="#81B64C"/><circle cx="14.5" cy="12.5" r="1.8" fill="#81B64C"/><rect x="11" y="3" width="2" height="4" fill="currentColor"/></svg>
-        Play vs Computer
-      </button>
-      <button class="btn btn--ghost" id="go-rules">How do the teleports work?</button>
-    </div>`;
-  $('go-bot').onclick = () => panelBotSetup();
-  $('go-rules').onclick = () => showRules();
-}
+function capitalize(value) { return value.charAt(0).toUpperCase() + value.slice(1); }
 
-function panelBotSetup() {
-  panel.innerHTML = `
-    <div class="panel__head">
-      <div class="panel__title">Play vs Computer</div>
-      <div class="panel__sub">Pick your poison</div>
-    </div>
-    <div class="panel__body">
-      <div class="choice-row" id="lvl-row">
-        <button class="choice" data-lvl="easy">MottyBot Jr.<small>600</small></button>
-        <button class="choice choice--on" data-lvl="medium">MottyBot<small>1200</small></button>
-        <button class="choice" data-lvl="hard">GM MottyBot<small>2000</small></button>
-      </div>
-      <div class="choice-row" id="col-row">
-        <button class="choice choice--on" data-col="w"><svg class="mini-piece" viewBox="0 0 100 100"><use href="#pc-wk"/></svg><br>White</button>
-        <button class="choice" data-col="random"><svg class="mini-piece" viewBox="0 0 100 100"><use href="#pc-wp"/></svg><br>Random</button>
-        <button class="choice" data-col="b"><svg class="mini-piece" viewBox="0 0 100 100"><use href="#pc-bk"/></svg><br>Black</button>
-      </div>
-      <button class="btn btn--green" id="start-bot">Play</button>
-      <button class="btn btn--ghost" id="back-home">Back</button>
-    </div>`;
-  const pick = (rowId) => {
-    const row = $(rowId);
-    row.addEventListener('click', (e) => {
-      const b = e.target.closest('.choice');
-      if (!b) return;
-      row.querySelectorAll('.choice').forEach((x) => x.classList.remove('choice--on'));
-      b.classList.add('choice--on');
-    });
-  };
-  pick('lvl-row');
-  pick('col-row');
-  $('back-home').onclick = () => panelHome();
-  $('start-bot').onclick = () => {
-    const lvl = panel.querySelector('#lvl-row .choice--on').dataset.lvl;
-    let col = panel.querySelector('#col-row .choice--on').dataset.col;
-    if (col === 'random') col = Math.random() < .5 ? 'w' : 'b';
-    startBotGame(lvl, col);
-  };
-}
-
-function panelPlaying(subtitle) {
-  panel.innerHTML = `
-    <div class="panel__head">
-      <div class="panel__title">${state.bot.name}</div>
-      <div class="panel__sub">${subtitle || ''}</div>
-    </div>
-    <div class="movelist" id="movelist"></div>
-    <div class="panel__actions">
-      <button class="btn btn--danger-ghost" id="act-resign">Resign</button>
-      <button class="btn btn--gray btn--sm" id="act-new">New Game</button>
-    </div>`;
-  $('act-resign').onclick = () => {
-    if (state.over || !state.match) return;
-    state.match.resign(state.myColor);
-    endGame();
-  };
-  $('act-new').onclick = () => panelHome();
-  renderMoveList();
-}
-
-/* ================= game flow ================= */
-function freshMatch(seed, myColor) {
-  state.match = new ChaosMatch(seed);
-  state.myColor = myColor;
-  state.over = false;
-  board.setOrientation(myColor);
+/* Game setup and loop */
+function configureBoardForMatch() {
+  board.setOrientation(state.myColor);
   board.setPosition(positionMap());
   board.setLastMove(null);
-  board.setCheck(null);
+  board.setTeleportMarks([]);
+  updateCheckMark();
+  $('top-name').textContent = state.bot.name;
+  $('top-detail').textContent = `${state.bot.label} difficulty`;
+  $('bottom-name').textContent = 'You';
+  $('bottom-detail').textContent = state.myColor === 'w' ? 'White' : 'Black';
   renderCaptured();
+}
+
+function startBotGame(level, myColor, { seed = randomSeed(), daily = null } = {}) {
+  state.serial++;
+  state.match = new ChaosMatch(seed);
+  state.myColor = myColor;
+  state.bot = BOTS[level] || BOTS.medium;
+  state.daily = daily;
+  state.over = false;
+  state.animating = false;
+  state.screen = 'playing';
+  state.resultRecorded = false;
+  state.result = null;
+  state.replay = null;
+  configureBoardForMatch();
+  panelPlaying();
+  setFate({ title: 'Make a move. Fate moves next.', copy: 'One non-king piece from the moving side will teleport afterward.' });
   sound.unlock();
   sound.start();
+  persistGame();
+  botLoop(state.serial);
 }
 
-async function playTeleports(events) {
-  if (!events || !events.length) return;
-  board.setInteractive(null);
-  state.animating = true;
-  board.setTeleportMarks(events);
-  const who = events[0].piece.color === state.myColor ? 'your' : 'their';
-  chip(`⚡ ${who} ${PIECE_NAMES[events[0].piece.type]} teleported`);
-  for (const ev of events) {
-    sound.teleport();
-    await board.animateTeleport(ev);
+function resumeGame(data) {
+  try {
+    state.serial++;
+    state.match = replayMatch(data.seed, data.ucis);
+    state.match.startedAt = data.startedAt || Date.now();
+    state.myColor = data.myColor;
+    state.bot = BOTS[data.level] || BOTS.medium;
+    state.daily = data.daily || null;
+    state.over = false;
+    state.animating = false;
+    state.screen = 'playing';
+    state.resultRecorded = false;
+    state.result = null;
+    configureBoardForMatch();
+    panelPlaying();
+    restoreLastFateEvent();
+    persistGame();
+    botLoop(state.serial);
+  } catch {
+    clearActive();
+    showModal(`
+      <div class="modal__head"><h2 id="modal-title">That game could not be restored.</h2><p>The saved position was invalid, so it has been cleared safely.</p></div>
+      <div class="modal__body"><button class="btn btn--primary" id="restore-ok">Start a new game</button></div>`);
+    $('restore-ok').onclick = () => { hideModal(); panelSetup(); };
   }
-  state.animating = false;
-  syncBoard();
-  renderMoveList();
-  updateCheckMark();
 }
 
-async function playMoveAnim(move, { instant = false } = {}) {
+function restoreLastFateEvent() {
+  const event = [...state.match.log].reverse().find((entry) => entry.kind === 'teleport');
+  if (!event) {
+    setFate({ title: 'Make a move. Fate moves next.', copy: 'One non-king piece from the moving side will teleport afterward.' });
+    return;
+  }
+  showSettledFate(event);
+}
+
+async function playMoveAnimation(move, { instant = false } = {}) {
   state.animating = true;
-  const rookHop = move.flags.includes('k') ? { rookFrom: move.color === 'w' ? 'h1' : 'h8', rookTo: move.color === 'w' ? 'f1' : 'f8' }
-    : move.flags.includes('q') ? { rookFrom: move.color === 'w' ? 'a1' : 'a8', rookTo: move.color === 'w' ? 'd1' : 'd8' }
+  const rookHop = move.flags.includes('k')
+    ? { rookFrom: move.color === 'w' ? 'h1' : 'h8', rookTo: move.color === 'w' ? 'f1' : 'f8' }
+    : move.flags.includes('q')
+      ? { rookFrom: move.color === 'w' ? 'a1' : 'a8', rookTo: move.color === 'w' ? 'd1' : 'd8' }
       : {};
   const epSquare = move.flags.includes('e') ? move.to[0] + (move.color === 'w' ? '5' : '4') : null;
-  if (move.captured) sound.capture(); else sound.move();
+  move.captured ? sound.capture() : sound.move();
   if (instant) {
-    // piece already sits on target (drag drop); still handle rook/ep/promo
     await board.animateMove({ from: move.to, to: move.to, ...rookHop, epSquare, promotion: move.promotion, color: move.color });
   } else {
     await board.animateMove({ from: move.from, to: move.to, ...rookHop, epSquare, promotion: move.promotion, color: move.color });
@@ -264,99 +440,98 @@ async function playMoveAnim(move, { instant = false } = {}) {
   updateCheckMark();
 }
 
-function endGame() {
-  const st = state.match.status();
-  state.over = true;
+async function playTeleport(events) {
   board.setInteractive(null);
-  setThinking(false);
-  setYourTurn(false);
-  const iWon = st.winner === state.myColor;
-  const draw = !st.winner;
-  sound.end(iWon);
-  const title = draw ? 'Draw' : iWon ? 'You Won!' : `${state.bot.name} Wins`;
-  const why = {
-    checkmate: 'by checkmate',
-    stalemate: 'by stalemate',
-    'insufficient material': 'nobody can mate anybody',
-    'fifty-move rule': 'fifty moves, zero progress',
-    resignation: iWon ? 'by resignation' : 'you resigned',
-  }[st.reason] || st.reason;
-  showModal(`
-    <div class="modal__banner ${draw ? '' : iWon ? 'modal__banner--win' : 'modal__banner--loss'}">
-      <div class="modal__title">${title}</div>
-      <div class="modal__sub">${why}</div>
-    </div>
-    <div class="modal__body">
-      ${st.reason === 'checkmate' ? '<p>The teleporter had every chance to save this and chose not to. Nothing personal.</p>' : ''}
-      <button class="btn btn--green" id="m-rematch">Rematch</button>
-      <button class="btn btn--gray btn--sm" id="m-home">Back to Menu</button>
-    </div>`);
-  $('m-rematch').onclick = () => { hideModal(); startBotGame(state.bot.level, state.myColor); };
-  $('m-home').onclick = () => { hideModal(); panelHome(); };
+  state.animating = true;
+  setFate({ phase: 'choosing', title: 'Fate is choosing', copy: 'One piece. One empty square. No one gets a vote.' });
+  announce('Fate is choosing a piece and destination.');
+  if (!REDUCED_MOTION) await wait(230);
+
+  if (!events?.length) {
+    state.animating = false;
+    setFate({ title: 'Fate had no eligible move', copy: 'Only the king remained, so the turn continues without a teleport.' });
+    persistGame();
+    return;
+  }
+
+  const event = events[0];
+  board.setTeleportMarks(events);
+  sound.teleport();
+  await board.animateTeleport(event);
+  state.animating = false;
+  syncBoard();
+  renderMoveList();
+  renderCaptured();
+  updateCheckMark();
+  showSettledFate(event);
+  persistGame();
 }
 
-/* ================= bot mode ================= */
-function startBotGame(lvl, myColor) {
-  state.bot = BOTS[lvl];
-  freshMatch(randomSeed(), myColor);
-  $('top-name').textContent = state.bot.name;
-  $('top-rating').textContent = `(${state.bot.rating})`;
-  $('top-avatar').className = 'avatar avatar--bot';
-  $('bottom-name').textContent = 'You';
-  $('bottom-rating').textContent = '';
-  panelPlaying(state.bot.blurb);
-  botLoop();
+function showSettledFate(event) {
+  const yours = event.piece.color === state.myColor;
+  const owner = yours ? 'your' : "MottyBot's";
+  const piece = PIECE_NAMES[event.piece.type];
+  setFate({
+    phase: 'settled',
+    title: `Fate moved ${owner} ${piece}`,
+    copy: 'The position is final. The next turn begins now.',
+    route: `${event.from} → ${event.to}`,
+  });
+  announce(`Fate moved ${owner} ${piece} from ${event.from} to ${event.to}.`);
 }
 
-async function botLoop() {
-  const m = state.match;
-  while (!state.over && state.match === m) {
-    // 1. settle the teleport owed by the move that just happened
-    await playTeleports(m.teleportIfDue());
-    if (state.over || state.match !== m) return;
+async function botLoop(serial) {
+  const match = state.match;
+  while (!state.over && state.screen === 'playing' && state.match === match && state.serial === serial) {
+    const owedTeleport = match.teleportIfDue();
+    if (owedTeleport !== null) await playTeleport(owedTeleport);
+    if (state.over || state.screen !== 'playing' || state.match !== match || state.serial !== serial) return;
 
-    // 2. is it actually over, now that the dice have landed?
-    const st = m.status();
-    if (st.over) { endGame(); return; }
-    if (st.check && m.turn() === state.myColor) sound.check();
+    const status = match.status();
+    if (status.over) {
+      endGame();
+      return;
+    }
+    if (status.check) sound.check();
 
-    // 3. your turn: hand control back and wait for handleUserMove
-    if (m.turn() === state.myColor) {
-      setYourTurn(true);
+    if (match.turn() === state.myColor) {
       setThinking(false);
-      board.setInteractive(state.myColor, (sq) => m.legalMoves(sq));
+      setYourTurn(true);
+      board.setInteractive(state.myColor, (square) => match.legalMoves(square));
+      announce(status.check ? 'Your king is in check. Your move.' : 'Your move.');
       return;
     }
 
-    // 4. bot's turn
     setYourTurn(false);
     board.setInteractive(null);
     setThinking(true);
-    const t0 = Date.now();
-    let mv;
+    setFate({ phase: 'thinking', title: 'MottyBot is thinking', copy: 'It is searching the position Fate left behind.' });
+    const started = performance.now();
+    let candidate;
     try {
-      mv = await botMove(m.fen(), state.bot.level);
+      candidate = await requestBotMove(match.fen(), state.bot.level);
     } catch {
-      const legal = m.legalMoves();
-      mv = legal.length ? { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } : null;
+      const legal = match.legalMoves();
+      candidate = legal.length ? { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } : null;
     }
-    // never snap: a move that lands instantly still reads as deliberation
-    const elapsed = Date.now() - t0;
-    if (elapsed < MIN_THINK_MS) await wait(MIN_THINK_MS - elapsed);
+    const remaining = state.bot.minThink - (performance.now() - started);
+    if (remaining > 0) await wait(remaining);
     setThinking(false);
-    if (!mv || state.over || state.match !== m) return;
-    const move = m.applyMove(mv);
-    await playMoveAnim(move);
+    if (!candidate || state.over || state.screen !== 'playing' || state.match !== match || state.serial !== serial) return;
+    const move = match.applyMove(candidate);
+    persistGame();
+    announce(`MottyBot played ${move.san.replace('#', ' checkmate')}.`);
+    await playMoveAnimation(move);
   }
 }
 
 async function handleUserMove({ from, to, promotion, instant }) {
-  const m = state.match;
-  if (!m || state.over || state.animating) return;
-  if (m.turn() !== state.myColor) return;
+  const match = state.match;
+  if (!match || state.over || state.animating || state.screen !== 'playing') return;
+  if (match.turn() !== state.myColor) return;
   let move;
   try {
-    move = m.applyMove({ from, to, promotion });
+    move = match.applyMove({ from, to, promotion });
   } catch {
     sound.illegal();
     syncBoard();
@@ -364,60 +539,300 @@ async function handleUserMove({ from, to, promotion, instant }) {
   }
   setYourTurn(false);
   board.setInteractive(null);
-  await playMoveAnim(move, { instant });
-  botLoop();
+  persistGame();
+  await playMoveAnimation(move, { instant });
+  botLoop(state.serial);
 }
 
-/* ================= modals ================= */
-function showModal(html) {
-  $('modal').innerHTML = html;
-  $('modal-scrim').hidden = false;
-}
-function hideModal() { $('modal-scrim').hidden = true; }
-$('modal-scrim').addEventListener('click', (e) => {
-  if (e.target === $('modal-scrim')) hideModal();
-});
-function showRules() {
-  showModal(`
-    <div class="modal__banner"><div class="modal__title">Motty's Rules</div>
-      <div class="modal__sub">Chess, technically</div></div>
-    <div class="modal__body">
-      <p class="modal__rule-title">The one rule</p>
-      <p>You move first. Then <b>one of your own pieces teleports</b> to a random empty square. Your opponent moves, then one of theirs does the same. Totally random. Nobody chooses which piece. Nobody chooses where.</p>
-      <p class="modal__rule-title">The small print</p>
-      <p><b>Kings never teleport.</b> Kings do not do that sort of thing.</p>
-      <p>Teleports never capture and never create a check. Fate is chaotic, not cruel.</p>
-      <p>A pawn cannot teleport onto the last rank. It can land one square short and make you sweat.</p>
-      <p>Checkmate only counts once your own teleport is done. Deliver mate, then watch the universe fling your mating piece into a corner. It happens.</p>
-      <p>Everything else is completely standard chess, played fairly by a bot that is genuinely trying to beat you. Good luck with your opening prep.</p>
-      <button class="btn btn--green" id="m-ok">Understood. Probably.</button>
-    </div>`);
-  $('m-ok').onclick = hideModal;
+/* Results and replay */
+function outcomeFor(status) {
+  if (!status.winner) return 'draw';
+  return status.winner === state.myColor ? 'win' : 'loss';
 }
 
-/* ================= rail buttons ================= */
-$('nav-new').onclick = () => panelHome();
-$('nav-rules').onclick = () => showRules();
-$('nav-sound').onclick = () => {
-  const muted = sound.toggle();
-  $('nav-sound').setAttribute('aria-pressed', String(!muted));
-  $('nav-sound-label').textContent = muted ? 'Sound Off' : 'Sound On';
-};
-$('nav-sound').setAttribute('aria-pressed', String(!sound.muted));
-$('nav-sound-label').textContent = sound.muted ? 'Sound Off' : 'Sound On';
+function reasonText(status, outcome) {
+  if (status.reason === 'checkmate') return 'by checkmate';
+  if (status.reason === 'stalemate') return 'by stalemate';
+  if (status.reason === 'insufficient material') return 'by insufficient material';
+  if (status.reason === 'fifty-move rule') return 'by the fifty-move rule';
+  if (status.reason === 'resignation') return outcome === 'win' ? 'MottyBot resigned' : 'you resigned';
+  return status.reason || 'game over';
+}
 
-/* ================= boot ================= */
-function boot() {
-  // static start position on the board behind the menu
-  state.match = new ChaosMatch('lobby');
+function endGame() {
+  if (!state.match || state.over) return;
+  const status = state.match.status();
+  if (!status.over) return;
   state.over = true;
-  board.setPosition(positionMap());
-  panelHome();
-  if (!localStorage.getItem('mv-rules-seen')) {
-    localStorage.setItem('mv-rules-seen', '1');
-    showRules();
+  state.screen = 'postgame';
+  board.setInteractive(null);
+  setThinking(false);
+  setYourTurn(false);
+  clearActive();
+
+  const outcome = outcomeFor(status);
+  if (!state.resultRecorded) {
+    recordResult(outcome, state.daily);
+    state.resultRecorded = true;
+  }
+  const moves = state.match.log.filter((entry) => entry.kind === 'move').length;
+  const teleports = state.match.log.filter((entry) => entry.kind === 'teleport').length;
+  const captures = state.match.log.filter((entry) => entry.kind === 'move' && entry.captured).length;
+  state.result = { status, outcome, moves, teleports, captures };
+  sound.end(outcome === 'win');
+  panelPostGame();
+  showResultModal();
+}
+
+function showResultModal() {
+  const { status, outcome, moves, teleports, captures } = state.result;
+  const title = outcome === 'draw' ? 'Draw.' : outcome === 'win' ? 'You won.' : 'MottyBot won.';
+  const note = outcome === 'win'
+    ? 'You read the chaos better. MottyBot is allowed to lose, and this time it did.'
+    : outcome === 'loss'
+      ? 'The board changed. MottyBot adapted. Try the same Fate again or roll a new one.'
+      : 'Nobody escaped the position with a win.';
+  showModal(`
+    <div class="modal__head">
+      <div class="result-mark">${escapeHTML(reasonText(status, outcome))}</div>
+      <h2 id="modal-title">${title}</h2>
+      <p>${note}</p>
+    </div>
+    <div class="modal__body">
+      <div class="result-stats">
+        <div><strong>${moves}</strong><span>Moves</span></div>
+        <div><strong>${teleports}</strong><span>Teleports</span></div>
+        <div><strong>${captures}</strong><span>Captures</span></div>
+      </div>
+      <div class="button-stack">
+        <button class="btn btn--primary" id="result-new">New chaos</button>
+        <button class="btn btn--secondary" id="result-same">Replay the same Fate</button>
+        <button class="btn btn--secondary" id="result-review">Review game</button>
+        <button class="btn btn--quiet" id="result-share">Share this challenge</button>
+      </div>
+      <div class="copy-confirm" id="copy-confirm" aria-live="polite"></div>
+    </div>`);
+  $('result-new').onclick = () => { hideModal(); startBotGame(state.bot.level, state.myColor); };
+  $('result-same').onclick = () => { const seed = state.match.seed; const daily = state.daily; hideModal(); startBotGame(state.bot.level, state.myColor, { seed, daily }); };
+  $('result-review').onclick = () => { hideModal(); enterReplay(); };
+  $('result-share').onclick = shareChallenge;
+}
+
+async function shareChallenge() {
+  const url = challengeURL();
+  const data = {
+    title: "Chess (Motty's Version)",
+    text: 'Play the same chaos seed against MottyBot.',
+    url,
+  };
+  try {
+    if (navigator.share) await navigator.share(data);
+    else {
+      await navigator.clipboard.writeText(url);
+      const confirm = $('copy-confirm');
+      if (confirm) confirm.textContent = 'Challenge link copied.';
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    const confirm = $('copy-confirm');
+    if (confirm) confirm.textContent = 'Copy the address from your browser to share it.';
   }
 }
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+function buildReplayFrames() {
+  const frames = [{ fen: START_FEN, kind: 'start', label: 'Starting position', detail: 'Before move 1' }];
+  for (const entry of state.match.log) {
+    if (entry.kind === 'move') {
+      const number = Math.floor(entry.ply / 2) + 1;
+      frames.push({
+        fen: entry.fenAfter,
+        kind: 'move',
+        label: `${number}${entry.color === 'w' ? '.' : '…'} ${entry.san}`,
+        detail: entry.color === state.myColor ? 'Your move' : "MottyBot's move",
+        from: entry.from,
+        to: entry.to,
+      });
+    } else if (entry.kind === 'teleport') {
+      frames.push({
+        fen: entry.fenAfter,
+        kind: 'teleport',
+        label: `${capitalize(PIECE_NAMES[entry.piece.type])} ${entry.from} → ${entry.to}`,
+        detail: 'Fate event',
+        from: entry.from,
+        to: entry.to,
+        piece: entry.piece,
+      });
+    }
+  }
+  return frames;
+}
+
+function enterReplay() {
+  if (!state.match) return;
+  state.screen = 'replay';
+  panel.className = 'matchdesk';
+  state.replay = { frames: buildReplayFrames(), index: 0 };
+  board.setInteractive(null);
+  panel.innerHTML = `
+    <div class="desk-head"><h2>Review the game.</h2><p>Step through each move and the teleport that followed it.</p></div>
+    <div class="replay-readout"><strong id="replay-label"></strong><span id="replay-detail"></span></div>
+    <div class="replay-controls" aria-label="Replay controls">
+      <button id="replay-start" aria-label="First position">|‹</button>
+      <button id="replay-prev" aria-label="Previous position">‹</button>
+      <button id="replay-next" aria-label="Next position">›</button>
+      <button id="replay-end" aria-label="Final position">›|</button>
+    </div>
+    <div class="desk-body"><p style="color:var(--muted);line-height:1.5;margin:0">Moves and Fate events are separate frames so it is always clear what you chose and what the house rule changed.</p></div>
+    <div class="desk-footer"><button class="btn btn--primary" id="replay-exit">Exit review</button></div>`;
+  $('replay-start').onclick = () => setReplayFrame(0);
+  $('replay-prev').onclick = () => setReplayFrame(state.replay.index - 1);
+  $('replay-next').onclick = () => setReplayFrame(state.replay.index + 1);
+  $('replay-end').onclick = () => setReplayFrame(state.replay.frames.length - 1);
+  $('replay-exit').onclick = exitReplay;
+  setReplayFrame(0);
+}
+
+function setReplayFrame(index) {
+  if (!state.replay) return;
+  const max = state.replay.frames.length - 1;
+  state.replay.index = Math.max(0, Math.min(max, index));
+  const frame = state.replay.frames[state.replay.index];
+  board.setPosition(positionMap(frame.fen));
+  board.setLastMove(frame.kind === 'move' ? frame.from : null, frame.kind === 'move' ? frame.to : null);
+  board.setTeleportMarks(frame.kind === 'teleport' ? [{ from: frame.from, to: frame.to }] : []);
+  updateCheckMark(frame.fen);
+  $('replay-label').textContent = frame.label;
+  $('replay-detail').textContent = `${frame.detail}. Frame ${state.replay.index + 1} of ${state.replay.frames.length}.`;
+  $('replay-start').disabled = state.replay.index === 0;
+  $('replay-prev').disabled = state.replay.index === 0;
+  $('replay-next').disabled = state.replay.index === max;
+  $('replay-end').disabled = state.replay.index === max;
+  if (frame.kind === 'teleport') {
+    const owner = frame.piece.color === state.myColor ? 'your' : "MottyBot's";
+    setFate({ title: `Fate moved ${owner} ${PIECE_NAMES[frame.piece.type]}`, copy: 'Replay frame', route: `${frame.from} → ${frame.to}` });
+  } else {
+    setFate({ title: frame.label, copy: frame.detail });
+  }
+}
+
+function exitReplay() {
+  state.screen = 'postgame';
+  state.replay = null;
+  board.setPosition(positionMap());
+  board.setLastMove(null);
+  board.setTeleportMarks([]);
+  updateCheckMark();
+  restoreLastFateEvent();
+  panelPostGame();
+}
+
+/* Dialogs */
+let restoreFocus = null;
+let modalOnClose = null;
+
+function showModal(html, { dismissible = true, onClose = null } = {}) {
+  restoreFocus = document.activeElement;
+  modalOnClose = onClose;
+  $('modal').innerHTML = `${dismissible ? '<button class="modal__close" id="modal-close" type="button" aria-label="Close dialog">×</button>' : ''}${html}`;
+  $('modal-scrim').hidden = false;
+  if (dismissible) $('modal-close').onclick = hideModal;
+  requestAnimationFrame(() => ($('modal-close') || $('modal').querySelector('button'))?.focus());
+}
+
+function hideModal() {
+  if ($('modal-scrim').hidden) return;
+  $('modal-scrim').hidden = true;
+  const callback = modalOnClose;
+  modalOnClose = null;
+  callback?.();
+  restoreFocus?.focus?.();
+}
+
+$('modal-scrim').addEventListener('click', (event) => {
+  if (event.target === $('modal-scrim') && $('modal-close')) hideModal();
+});
+
+document.addEventListener('keydown', (event) => {
+  if ($('modal-scrim').hidden) return;
+  if (event.key === 'Escape' && $('modal-close')) {
+    event.preventDefault();
+    hideModal();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = [...$('modal').querySelectorAll('button, a, input, [tabindex]:not([tabindex="-1"])')].filter((item) => !item.disabled);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+
+function showRules() {
+  markRulesSeen();
+  showModal(`
+    <div class="modal__head"><h2 id="modal-title">The one house rule.</h2><p>Ordinary chess, followed by one random relocation.</p></div>
+    <div class="modal__body">
+      <ol class="rule-list">
+        <li><span class="rule-mark">1</span><span><b>Move normally.</b> Every move you choose must be legal chess.</span></li>
+        <li><span class="rule-mark">2</span><span><b>Then one piece from that same side teleports.</b> Kings never teleport.</span></li>
+        <li><span class="rule-mark">3</span><span><b>The piece and destination are random.</b> Every eligible non-king piece has the same chance. Then every eligible empty square for that piece has the same chance.</span></li>
+        <li><span class="rule-mark">4</span><span><b>A teleport never captures.</b> The destination must be empty. It can be unsafe, and the teleported piece can give check.</span></li>
+        <li><span class="rule-mark">5</span><span><b>Pawns stop short of the back rank.</b> They may teleport to the second or seventh rank, then promote with a normal move later.</span></li>
+        <li><span class="rule-mark">6</span><span><b>The result is checked after the teleport.</b> A mating move only counts if the changed position is still mate.</span></li>
+      </ol>
+      <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
+    </div>`);
+  $('rules-ok').onclick = hideModal;
+}
+
+function confirmResign() {
+  if (!state.match || state.over) return;
+  showModal(`
+    <div class="modal__head"><h2 id="modal-title">Resign this game?</h2><p>This records a loss and ends the current match.</p></div>
+    <div class="modal__body"><div class="button-stack"><button class="btn btn--danger" id="resign-yes">Resign</button><button class="btn btn--secondary" id="resign-no">Keep playing</button></div></div>`);
+  $('resign-no').onclick = hideModal;
+  $('resign-yes').onclick = () => {
+    hideModal();
+    state.match.resign(state.myColor);
+    endGame();
+  };
+}
+
+function requestNewGame() {
+  if (!state.match || state.over || state.screen === 'home' || state.screen === 'setup') {
+    panelSetup();
+    return;
+  }
+  showModal(`
+    <div class="modal__head"><h2 id="modal-title">Start a different game?</h2><p>Your current position is saved on this device until you replace it.</p></div>
+    <div class="modal__body"><div class="button-stack"><button class="btn btn--primary" id="new-confirm">Choose a new match</button><button class="btn btn--secondary" id="new-cancel">Keep playing</button></div></div>`);
+  $('new-cancel').onclick = hideModal;
+  $('new-confirm').onclick = () => {
+    hideModal();
+    state.serial++;
+    state.over = true;
+    state.match = null;
+    panelSetup();
+  };
+}
+
+/* Global controls and boot */
+$('nav-new').onclick = requestNewGame;
+$('nav-rules').onclick = showRules;
+$('nav-sound').onclick = () => {
+  const muted = sound.toggle();
+  $('nav-sound').setAttribute('aria-pressed', String(!muted));
+  $('nav-sound-label').textContent = muted ? 'Sound off' : 'Sound on';
+};
+
+function boot() {
+  $('nav-sound').setAttribute('aria-pressed', String(!sound.muted));
+  $('nav-sound-label').textContent = sound.muted ? 'Sound off' : 'Sound on';
+  const lobby = new ChaosMatch('lobby-board');
+  board.setPosition(parseFen(lobby.fen()).board);
+  board.setInteractive(null);
+  panelHome();
+}
+
 boot();

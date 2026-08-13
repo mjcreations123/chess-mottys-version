@@ -1,0 +1,12 @@
+{
+  "name": "Chess (Motty's Version)",
+  "short_name": "Motty Chess",
+  "description": "Real chess with one random teleport after every move.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101315",
+  "theme_color": "#15191c",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

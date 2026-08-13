@@ -25,6 +25,7 @@ export class ChaosMatch {
     this.teleportPending = false; // a move was played and owes its teleport
     this.log = [];              // { kind: 'move'|'teleport', ... }
     this.resignedBy = null;
+    this.startedAt = Date.now();
   }
 
   turn() { return this.chess.turn(); }
@@ -38,9 +39,11 @@ export class ChaosMatch {
     // the side that just moved is the opposite of whoever is now to move
     const mover = this.chess.turn() === 'w' ? 'b' : 'w';
     const rng = phaseRng(this.seed, this.ply);
+    const fenBefore = this.fen();
     const events = runTeleportPhase(this.chess, rng, mover);
+    const fenAfter = this.fen();
     for (const ev of events) {
-      this.log.push({ kind: 'teleport', ply: this.ply, ...ev });
+      this.log.push({ kind: 'teleport', ply: this.ply, fenBefore, fenAfter, ...ev });
     }
     return events;
   }
@@ -74,6 +77,7 @@ export class ChaosMatch {
 
   // Apply a real move for the side to move. Throws if illegal.
   applyMove({ from, to, promotion }) {
+    const fenBefore = this.fen();
     const move = this.chess.move({ from, to, promotion: promotion || undefined });
     // '#' is provisional here: mate is only real if it survives the next
     // shuffle, so the log never claims it early.
@@ -82,6 +86,7 @@ export class ChaosMatch {
       kind: 'move', ply: this.ply, san, uci: move.from + move.to + (move.promotion || ''),
       color: move.color, captured: move.captured || null, flags: move.flags,
       from: move.from, to: move.to, piece: move.piece, promotion: move.promotion || null,
+      fenBefore, fenAfter: this.fen(),
     });
     this.ply++;
     this.teleportPending = true;

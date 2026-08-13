@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Chess (Motty's Version). Real chess, fair engine, except two random pieces teleport before every turn.",
+  "description": "Chess (Motty's Version). Real chess against a fair bot, with one random non-king teleport after every move.",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "test": "node test/run-all.mjs"

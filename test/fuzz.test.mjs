@@ -5,7 +5,7 @@ import { Chess } from '../js/vendor/chess.js';
 import { ChaosMatch } from '../js/core/chaos.js';
 import { parseFen, serializeFen } from '../js/core/fen.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
-import { assert, materialSignature, checkersOn, summary } from './helpers.mjs';
+import { assert, ok, materialSignature, checkersOn, summary } from './helpers.mjs';
 
 const GAMES = Number(process.env.FUZZ_GAMES || 150);
 const MAX_PLIES = 120;
@@ -48,7 +48,6 @@ for (let g = 0; g < GAMES; g++) {
     const sideToMove = m.turn();              // the opponent now
     assert(sideToMove !== moverSide, 'turn did not flip after a move');
     const sigBefore = materialSignature(m.chess);
-    const preCheckers = checkersOn(fenBefore, sideToMove);
 
     const events = m.teleportIfDue();
     turns++;
@@ -93,11 +92,6 @@ for (let g = 0; g < GAMES; g++) {
     assert(checkersOn(fenAfter, moverSide).length === 0,
       `mover's king attacked after their own teleport g${g} s${step}\n${fenBefore}\n${fenAfter}`);
 
-    // the opponent gains no NEW checkers from a teleport
-    for (const sq of checkersOn(fenAfter, sideToMove)) {
-      assert(preCheckers.includes(sq), `teleport created check from ${sq} g${g} s${step}\n${fenBefore}\n${fenAfter}`);
-    }
-
     // FEN round-trip stays exact and chess.js accepts the position
     assert(serializeFen(parseFen(fenAfter)) === fenAfter, `fen round-trip drift g${g} s${step}\n${fenAfter}`);
     new Chess(fenAfter);
@@ -111,4 +105,5 @@ console.log(`  endings: ${JSON.stringify(gamesEnded)}`);
 assert(kingTeleports === 0, 'a king teleported');
 assert(firstMoveHadPriorTeleport === 0, 'a game started with a teleport before white moved');
 assert(teleports >= turns * 0.95, 'teleports suspiciously rare (expect ~1 per turn)');
+ok(`${GAMES} random games preserved every house-rule invariant`);
 summary('fuzz.test.mjs');

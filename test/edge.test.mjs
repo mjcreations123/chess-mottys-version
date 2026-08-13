@@ -40,32 +40,24 @@ import { assert, ok, summary, checkersOn } from './helpers.mjs';
   ok('ep preserved otherwise');
 }
 
-// 5. A pinned-ish situation: teleporting a blocker away may NOT leave the
-// not-to-move king capturable. Black to move; white bishop f1 aims at black
-// king via e2-pawn gap... construct: white rook e1, white pawn e2 blocking,
-// black king e8, black to move. Pawn e2 may not teleport away (discovered
-// attack on the NOT-to-move king? No: black is to move, black king is the
-// to-move king; white king is not-to-move). Rebuild properly:
-// White to move. Black rook e8, black pawn... the black pawn e5 blocks e8
-// rook from the white king e1. If that pawn teleports, white king (to move)
-// would be in NEW check -> forbidden.
+// 5. The mover's own blocker may not teleport away and expose its king.
 {
-  const fen = '4r2k/8/8/4p3/8/8/8/4K3 w - - 0 1';
+  const fen = '4r2k/8/8/8/8/8/4B3/4K3 b - - 0 1';
   const chess = new Chess(fen);
-  const dests = validTeleportDests(chess, 'e5');
-  // the pawn blocks e8-rook vs e1-king: every legal destination must keep
+  const dests = validTeleportDests(chess, 'e2');
+  // the bishop blocks e8-rook vs e1-king: every valid destination must keep
   // the file blocked, i.e. stay on e2..e7
   for (const d of dests) {
     assert(d[0] === 'e' && Number(d[1]) >= 2 && Number(d[1]) <= 7, `dest ${d} would expose the white king`);
   }
   // and simulated placement confirms no new check
   for (const d of dests) {
-    const pos = applyTeleport(parseFen(fen), 'e5', d);
+    const pos = applyTeleport(parseFen(fen), 'e2', d);
     const after = serializeFen(pos);
     assert(checkersOn(after, 'w').length === 0, `dest ${d} exposes white king`);
   }
-  assert(dests.length > 0, 'pawn should still have somewhere to go (e-file squares)');
-  ok('blocker teleport cannot create a new check');
+  assert(dests.length > 0, 'bishop should still have somewhere to go on the e-file');
+  ok('teleport cannot expose the mover own king');
 }
 
 // 6. Kings are never drawn as teleport candidates
@@ -91,31 +83,26 @@ import { assert, ok, summary, checkersOn } from './helpers.mjs';
   ok('a lone king yields no teleport');
 }
 
-// 7. Checking piece may not teleport into a new checking square
+// 7. A teleport is allowed to give check to the opponent.
 {
-  // black queen d8 checks nothing; white to move, black king h8, white queen a1
-  const fen = '7k/8/8/8/8/8/8/Q6K b - - 0 1'; // black to move; white queen a1
+  const fen = '7k/8/8/8/8/8/Q7/7K b - - 0 1';
   const chess = new Chess(fen);
-  const dests = validTeleportDests(chess, 'a1'); // white queen teleports before black's turn
-  for (const d of dests) {
-    const pos = applyTeleport(parseFen(fen), 'a1', d);
-    const after = serializeFen(pos);
-    assert(checkersOn(after, 'b').length === 0, `white queen dest ${d} creates check on to-move black king`);
-    assert(checkersOn(after, 'w').length === 0, `white queen dest ${d} exposes own king`);
-  }
-  ok('no teleport creates a check on the side to move');
+  const dests = validTeleportDests(chess, 'a2');
+  assert(dests.includes('a8'), 'a8 should remain eligible even though it gives check');
+  const after = serializeFen(applyTeleport(parseFen(fen), 'a2', 'a8'));
+  assert(checkersOn(after, 'b').includes('a8'), 'teleported queen should give check from a8');
+  assert(checkersOn(after, 'w').length === 0, 'teleport must still protect its own king');
+  ok('teleports may give check to the opponent');
 }
 
-// 8. Existing real check may persist through an unrelated teleport
+// 8. Pawns may teleport anywhere except the first and eighth ranks.
 {
-  // white king e1 in check from black rook e8; white to move; pawns a2 h7 exist
-  const fen = '4r2k/7p/8/8/8/8/P7/4K3 w - - 0 1';
+  const fen = '7k/8/8/8/8/8/P7/7K b - - 0 1';
   const chess = new Chess(fen);
-  const dests = validTeleportDests(chess, 'a2'); // unrelated white pawn
-  // pawn may go anywhere ranks 2-7 empty that does not block... blocking IS
-  // allowed (checkers become subset). Not creating new check is the only law.
-  assert(dests.length > 0, 'unrelated pawn can teleport during a real check');
-  ok('real check persists through unrelated teleports');
+  const dests = validTeleportDests(chess, 'a2');
+  assert(dests.includes('h7'), 'pawn should be able to teleport to the second-to-back rank');
+  assert(dests.every((sq) => sq[1] !== '1' && sq[1] !== '8'), 'pawn reached a back rank');
+  ok('pawns are excluded from both back ranks');
 }
 
 // 9. Bare-kings board: nothing crashes, nothing moves, kings stay legal
