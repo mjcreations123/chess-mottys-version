@@ -247,7 +247,7 @@ function panelHome() {
       <div class="rule-sequence" aria-label="How a turn works">
         <div class="rule-step"><span class="rule-step__number">1</span><div><strong>You make a legal move</strong><p>Normal chess rules apply to every move you choose.</p></div></div>
         <div class="rule-step"><span class="rule-step__number">2</span><div><strong>One of your pieces teleports</strong><p>Every eligible piece and every eligible empty destination are random.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>The new position becomes real</strong><p>Checks, captures and tactics continue from wherever Fate left the board.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Fate stops at ten pieces</strong><p>Down to ten pieces on the board, Fate stops for good and the endgame is plain chess.</p></div></div>
       </div>
       <div class="button-stack">
         <button class="btn btn--primary" id="choose-game">
@@ -445,9 +445,10 @@ function resumeGame(data) {
 }
 
 function restoreLastFateEvent() {
+  if (!state.match.fateState().active) { showFateStopped(); return; }
   const event = [...state.match.log].reverse().find((entry) => entry.kind === 'teleport');
   if (!event) {
-    setFate({ title: 'Make a move. Fate moves next.', copy: 'One non-king piece from the moving side will teleport afterward.' });
+    setFate({ title: 'Make a move. Fate moves next.', copy: fateCountdown() || 'One non-king piece from the moving side will teleport afterward.' });
     return;
   }
   showSettledFate(event);
@@ -487,12 +488,8 @@ async function playTeleport(events) {
     const phase = state.match?.lastPhase;
     if (phase?.ended) {
       // the game just finished; the result modal speaks for itself
-    } else if (phase?.passed) {
-      setFate({
-        title: 'Fate passed this turn',
-        copy: 'With this little material left, Fate steps in less often so the endgame stays playable.',
-      });
-      announce('Fate passed this turn. Nothing teleported.');
+    } else if (phase?.stopped) {
+      showFateStopped();
     } else {
       setFate({ title: 'Fate had no eligible move', copy: 'Only the king remained, so the turn continues without a teleport.' });
     }
@@ -514,6 +511,26 @@ async function playTeleport(events) {
   reactToTeleport(event);
 }
 
+// The rule is only fair if you can see it coming, so every message carries the
+// piece count and how many captures are left before Fate goes quiet for good.
+function fateCountdown() {
+  const f = state.match?.fateState();
+  if (!f) return '';
+  if (!f.active) return `${f.onBoard} pieces left. Fate has stopped for good.`;
+  return f.untilStop === 1
+    ? `${f.onBoard} pieces left. One more capture and Fate stops for good.`
+    : `${f.onBoard} pieces left. Fate stops for good at ${f.stopsAt}.`;
+}
+
+function showFateStopped() {
+  setFate({
+    phase: 'stopped',
+    title: 'Fate has left the board',
+    copy: `Only ${state.match.fateState().onBoard} pieces remain, so nothing teleports for the rest of this game. Plain chess from here.`,
+  });
+  announce('Fate has stopped for the rest of the game. Plain chess from here.');
+}
+
 function showSettledFate(event) {
   const yours = event.piece.color === state.myColor;
   const owner = yours ? 'your' : "MottyBot's";
@@ -521,7 +538,7 @@ function showSettledFate(event) {
   setFate({
     phase: 'settled',
     title: `Fate moved ${owner} ${piece}`,
-    copy: 'The position is final. The next turn begins now.',
+    copy: fateCountdown(),
     route: `${event.from} → ${event.to}`,
   });
   announce(`Fate moved ${owner} ${piece} from ${event.from} to ${event.to}.`);
@@ -838,7 +855,7 @@ function showRules() {
         <li><span class="rule-mark">4</span><span><b>A teleport never captures.</b> The destination must be empty. It can be unsafe, and the teleported piece can give check.</span></li>
         <li><span class="rule-mark">5</span><span><b>Pawns stop short of the back rank.</b> They may teleport to the second or seventh rank, then promote with a normal move later.</span></li>
         <li><span class="rule-mark">6</span><span><b>Checkmate ends it immediately.</b> A finished game gets no teleport. Nothing relocates after checkmate, stalemate or a draw.</span></li>
-        <li><span class="rule-mark">7</span><span><b>Fate eases off as the board empties.</b> With a full army it acts every turn. Once you are down to a handful of pieces it acts proportionally less often, so your last rook is not somewhere new every single turn and an endgame can actually be played.</span></li>
+        <li><span class="rule-mark">7</span><span><b>Fate stops at ten pieces.</b> While more than ten pieces stand on the board, Fate acts after every single move, always. The moment the board is down to ten or fewer, it stops for the rest of the game. It never comes back, because pieces only ever leave the board. The endgame is plain chess.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);

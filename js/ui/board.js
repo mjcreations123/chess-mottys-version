@@ -200,6 +200,11 @@ export class BoardView {
 
   /* ---------- overlays ---------- */
   #overlay(key, sq, cls) {
+    // Reusing a key must never orphan the previous node. The map would simply
+    // point at the new one and the old element would stay on the board with
+    // nothing tracking it, which is how stray dots used to survive a whole game.
+    const previous = this.overlays.get(key);
+    if (previous) previous.remove();
     const elm = document.createElement('div');
     elm.className = `overlay ${cls}`;
     this.#place(elm, sq);
@@ -229,7 +234,12 @@ export class BoardView {
   }
   #showHints(moves) {
     this.#clearOverlays('hint:');
+    // A promoting pawn returns four moves to the same square, one per piece it
+    // could become. That is one destination, so it gets one marker.
+    const seen = new Set();
     for (const m of moves) {
+      if (seen.has(m.to)) continue;
+      seen.add(m.to);
       const cap = m.captured ? 'overlay--ring' : 'overlay--dot';
       this.#overlay(`hint:${m.to}`, m.to, cap);
     }

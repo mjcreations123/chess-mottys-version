@@ -3,8 +3,9 @@
 // and the tests both drive this.
 //
 // Turn cycle, forever the same:
-//   side to move plays  ->  if the game ended, STOP  ->  otherwise ONE of that
-//   side's non-king pieces teleports  ->  other side plays  ->  ...
+//   side to move plays  ->  if the game ended, STOP  ->  otherwise, if more
+//   than FATE_STOPS_AT pieces remain, ONE of that side's non-king pieces
+//   teleports  ->  other side plays  ->  ...
 //
 // White's very first move has no teleport before it: you move, then you
 // teleport. A finished game is finished: checkmate, stalemate, a dead position
@@ -13,14 +14,14 @@
 
 import { Chess } from '../vendor/chess.js';
 import { phaseRng } from './rng.js';
-import { runTeleportPhase } from './teleport.js';
+import { runTeleportPhase, fateIsActive, countPieces, FATE_STOPS_AT } from './teleport.js';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 export class ChaosMatch {
-  constructor(seed, { fullForceAt } = {}) {
+  constructor(seed, { stopsAt } = {}) {
     this.seed = seed;
-    this.fullForceAt = fullForceAt;
+    this.stopsAt = stopsAt;
     this.lastPhase = null; // { eligible, passed } for the most recent teleport
     this.chess = new Chess(START_FEN);
     this.ply = 0;               // half-moves played
@@ -33,6 +34,20 @@ export class ChaosMatch {
   turn() { return this.chess.turn(); }
   fen() { return this.chess.fen(); }
 
+  // The house rule's state, readable at any moment so the UI never has to
+  // guess: how many pieces are on the board, the count Fate stops at, and how
+  // many captures are left before it goes quiet for good.
+  fateState() {
+    const stopsAt = this.stopsAt ?? FATE_STOPS_AT;
+    const onBoard = countPieces(this.chess);
+    return {
+      onBoard,
+      stopsAt,
+      active: onBoard > stopsAt,
+      untilStop: Math.max(0, onBoard - stopsAt),
+    };
+  }
+
   // Settle the teleport owed by the move just played. Returns the events
   // (array of 0 or 1), or null when nothing is owed.
   teleportIfDue() {
@@ -41,7 +56,7 @@ export class ChaosMatch {
     // A finished game is finished. The teleport never gets a chance to undo a
     // checkmate, a stalemate or a drawn position.
     if (this.status().over) {
-      this.lastPhase = { eligible: 0, passed: false, ended: true };
+      this.lastPhase = { eligible: 0, stopped: false, ended: true };
       return [];
     }
     // the side that just moved is the opposite of whoever is now to move
@@ -50,7 +65,7 @@ export class ChaosMatch {
     const fenBefore = this.fen();
     const report = {};
     const options = { report };
-    if (this.fullForceAt) options.fullForceAt = this.fullForceAt;
+    if (this.stopsAt !== undefined) options.stopsAt = this.stopsAt;
     const events = runTeleportPhase(this.chess, rng, mover, options);
     this.lastPhase = report;
     const fenAfter = this.fen();

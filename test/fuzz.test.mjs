@@ -5,7 +5,7 @@ import { Chess } from '../js/vendor/chess.js';
 import { ChaosMatch } from '../js/core/chaos.js';
 import { parseFen, serializeFen } from '../js/core/fen.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
-import { FULL_FORCE_AT } from '../js/core/teleport.js';
+import { FATE_STOPS_AT } from '../js/core/teleport.js';
 import { assert, ok, materialSignature, checkersOn, summary } from './helpers.mjs';
 
 const GAMES = Number(process.env.FUZZ_GAMES || 150);
@@ -69,21 +69,22 @@ for (let g = 0; g < GAMES; g++) {
       endingsLeftAlone++;
     }
 
-    // Every turn without a teleport must have a reason, and Fate is never
-    // allowed to pass while the mover still has a full army.
+    // Every turn without a teleport must have a reason, and while Fate is
+    // switched on it must act every single time. No dice in the timing.
     const phase = m.lastPhase;
     assert(phase, `no phase report g${g} s${step}`);
+    const fate = m.fateState();
     if (events.length === 0 && !endedOnTheMove) {
-      if (phase.eligible === 0) noCandidates++;
-      else {
-        assert(phase.passed, `empty phase with ${phase.eligible} candidates was not a pass g${g} s${step}`);
-        assert(phase.eligible < FULL_FORCE_AT,
-          `Fate passed with ${phase.eligible} eligible pieces; at or above ${FULL_FORCE_AT} it must always act g${g} s${step}`);
+      if (phase.stopped) {
+        assert(!fate.active, `Fate stopped while ${fate.onBoard} pieces remain g${g} s${step}`);
         passes++;
+      } else {
+        assert(phase.eligible === 0, `empty phase with ${phase.eligible} candidates and Fate active g${g} s${step}`);
+        noCandidates++;
       }
     }
-    if (!endedOnTheMove && phase.eligible >= FULL_FORCE_AT) {
-      assert(events.length === 1, `a full army must always be teleported g${g} s${step} (eligible ${phase.eligible})`);
+    if (!endedOnTheMove && fate.active && phase.eligible > 0) {
+      assert(events.length === 1, `Fate is active but did not act g${g} s${step} (${fate.onBoard} pieces)`);
       fullStrengthTurns++;
     }
 
@@ -134,12 +135,13 @@ for (let g = 0; g < GAMES; g++) {
 console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${teleports} teleports, ${emptyPhases} empty phases`);
 console.log(`  endings: ${JSON.stringify(gamesEnded)}`);
 console.log(`  endings left alone by Fate: ${endingsLeftAlone}`);
-console.log(`  skipped turns: ${passes} eased-off passes, ${noCandidates} with no candidate, ${endingsLeftAlone} finished games`);
-console.log(`  full-strength turns (always teleported): ${fullStrengthTurns}`);
+console.log(`  skipped turns: ${passes} after Fate stopped, ${noCandidates} with no candidate, ${endingsLeftAlone} finished games`);
+console.log(`  turns with Fate active (always teleported): ${fullStrengthTurns}`);
 assert(kingTeleports === 0, 'a king teleported');
 assert(firstMoveHadPriorTeleport === 0, 'a game started with a teleport before white moved');
 assert(endingsLeftAlone > 0, 'no game actually ended, so mate finality was never exercised');
-assert(fullStrengthTurns > 0, 'no full-strength turn was exercised');
+assert(fullStrengthTurns > 0, 'no active-Fate turn was exercised');
+assert(passes > 0, `the stop rule at ${FATE_STOPS_AT} pieces was never reached`);
 assert(passes + noCandidates + endingsLeftAlone === turns - teleports,
   'some turn was skipped without an explanation');
 assert(teleports >= turns * 0.7, 'teleports suspiciously rare across whole games');

@@ -47,32 +47,52 @@ export function validTeleportDests(chess, from) {
   return dests;
 }
 
-// Fate acts on every turn while you have a real army, and eases off as your
-// army disappears.
+// WHEN Fate acts is a hard rule, never a dice roll.
 //
-// Why: one piece is drawn from your eligible pieces, so the chance that any
-// GIVEN piece of yours is thrown across the board is 1/n. At sixteen pieces
-// that is background noise. At one piece it is a certainty, and your last
-// rook is somewhere new every single turn, which makes an endgame impossible
-// to play rather than merely chaotic. That is a hidden penalty on whoever has
-// less material.
+// While more than FATE_STOPS_AT pieces stand on the board, Fate acts after
+// every single move, without exception. The moment the board is down to
+// FATE_STOPS_AT pieces or fewer, Fate stops for the rest of the game.
 //
-// So the chance Fate acts at all is n / FULL_FORCE_AT, capped at 1. The chance
-// a given piece is moved becomes (n / FULL_FORCE_AT) * (1 / n) = 1 /
-// FULL_FORCE_AT: a constant, no matter how much material is left. Openings and
-// middlegames are untouched, because n is already at or above the threshold.
-export const FULL_FORCE_AT = 8;
+// It can never switch back on: pieces only ever leave the board (a capture
+// removes one, a promotion swaps one for another), so the count never rises.
+// Once it stops, it has stopped, and the endgame is plain chess.
+//
+// This replaced a version where Fate acted with a probability that tapered as
+// material ran out. The maths was even-handed but it read as pure caprice:
+// pieces would scatter, go quiet for a few turns, then scatter again with no
+// visible reason. A rule you cannot predict is not a rule.
+//
+// The count includes both kings, so it is exactly the number of pieces you can
+// see on the board.
+export const FATE_STOPS_AT = 10;
 
-export function teleportChance(eligibleCount, fullForceAt = FULL_FORCE_AT) {
-  if (eligibleCount <= 0) return 0;
-  return Math.min(1, eligibleCount / fullForceAt);
+export function countPieces(chess) {
+  let pieces = 0;
+  for (const row of chess.board()) {
+    for (const cell of row) if (cell) pieces++;
+  }
+  return pieces;
+}
+
+// Is Fate still in play at this position? Depends only on the board.
+export function fateIsActive(chess, stopsAt = FATE_STOPS_AT) {
+  return countPieces(chess) > stopsAt;
 }
 
 // Teleport ONE random non-king piece belonging to `side` (the player who just
 // moved) to a random valid empty square. Returns an array of 0 or 1 events
 // ({ from, to, piece }); empty when nothing of theirs can move or when Fate
 // passes this turn. Applies the change via surgical FEN edits.
-export function runTeleportPhase(chess, rng, side, { fullForceAt = FULL_FORCE_AT, report = null } = {}) {
+export function runTeleportPhase(chess, rng, side, { stopsAt = FATE_STOPS_AT, report = null } = {}) {
+  const onBoard = countPieces(chess);
+  if (report) { report.onBoard = onBoard; report.stopped = false; report.eligible = 0; }
+
+  // The hard rule, checked before anything else.
+  if (onBoard <= stopsAt) {
+    if (report) report.stopped = true;
+    return [];
+  }
+
   const eligible = [];
   for (const sq of SQUARES) {
     const p = chess.get(sq);
@@ -81,14 +101,8 @@ export function runTeleportPhase(chess, rng, side, { fullForceAt = FULL_FORCE_AT
     if (dests.length) eligible.push({ from: sq, dests });
   }
 
-  if (report) { report.eligible = eligible.length; report.passed = false; }
+  if (report) report.eligible = eligible.length;
   if (!eligible.length) return [];
-
-  // Draw the pass roll before the piece so the sequence stays deterministic.
-  if (rng.next() >= teleportChance(eligible.length, fullForceAt)) {
-    if (report) report.passed = true;
-    return [];
-  }
 
   const chosen = eligible[rng.int(eligible.length)];
   const to = chosen.dests[rng.int(chosen.dests.length)];

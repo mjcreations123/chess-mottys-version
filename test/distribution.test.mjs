@@ -9,10 +9,10 @@ import { assert, ok, summary } from './helpers.mjs';
 
 const FEN = '7k/8/8/8/8/8/8/KNB5 b - - 0 1';
 const RUNS = 24000;
-// This file measures the DRAW, not how often Fate acts. With two pieces left
-// Fate deliberately passes most turns (see fairness.test.mjs), so force it to
-// act every time and the two concerns stay separately testable.
-const ALWAYS = { fullForceAt: 1 };
+// This file measures the DRAW, not whether Fate is switched on. This position
+// is far below the stop threshold, so keep Fate on and the two concerns stay
+// separately testable (the stop rule lives in fairness.test.mjs).
+const ALWAYS = { stopsAt: 0 };
 const pieces = new Map([['b1', 0], ['c1', 0]]);
 const knightDests = new Map(validTeleportDests(new Chess(FEN), 'b1').map((sq) => [sq, 0]));
 

@@ -5,7 +5,7 @@
 //      nudging material off the board or favouring either colour.
 import { Chess } from '../js/vendor/chess.js';
 import { ChaosMatch } from '../js/core/chaos.js';
-import { runTeleportPhase, validTeleportDests, teleportChance, FULL_FORCE_AT } from '../js/core/teleport.js';
+import { runTeleportPhase, validTeleportDests, countPieces, fateIsActive, FATE_STOPS_AT } from '../js/core/teleport.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
 import { assert, ok, summary } from './helpers.mjs';
 
@@ -90,9 +90,9 @@ import { assert, ok, summary } from './helpers.mjs';
   const counts = new Map(dests.map((sq) => [sq, 0]));
   for (let i = 0; i < TRIALS; i++) {
     const board = new Chess(fen);
-    // fullForceAt 1 makes Fate always act, isolating the destination draw from
-    // the endgame pass roll that is measured separately below.
-    const [event] = runTeleportPhase(board, makeRng(seedFromString(`dest-${i}`)), 'w', { fullForceAt: 1 });
+    // stopsAt 0 keeps Fate switched on regardless of piece count, isolating
+    // the destination draw from the stop rule that is tested separately below.
+    const [event] = runTeleportPhase(board, makeRng(seedFromString(`dest-${i}`)), 'w', { stopsAt: 0 });
     assert(event.from === 'e2', 'only the pawn can move here');
     assert(counts.has(event.to), `landed on an ineligible square ${event.to}`);
     counts.set(event.to, counts.get(event.to) + 1);
@@ -165,53 +165,82 @@ import { assert, ok, summary } from './helpers.mjs';
   ok('piece types are drawn in proportion to how many are eligible, with no value weighting');
 }
 
-/* ---------- 3. Fate eases off in the endgame ---------- */
+/* ---------- 3. WHEN Fate acts is a hard rule, never a dice roll ---------- */
 
-// The whole point: the chance a GIVEN piece is thrown across the board must
-// stay flat as material disappears, instead of climbing to a certainty.
+// Above the line it must act every single time; at or below it, never. No
+// randomness in the timing at all, or the rule is unpredictable in play.
 {
-  for (const n of [1, 2, 3, 4, 6, 7]) {
-    const perPiece = teleportChance(n, FULL_FORCE_AT) / n;
-    const expected = 1 / FULL_FORCE_AT;
-    assert(Math.abs(perPiece - expected) < 1e-9,
-      `with ${n} pieces the per-piece rate is ${perPiece}, expected ${expected}`);
+  const above = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1'; // 32
+  const TRIALS = 3000;
+  let acted = 0;
+  for (let i = 0; i < TRIALS; i++) {
+    const board = new Chess(above);
+    if (runTeleportPhase(board, makeRng(seedFromString(`above-${i}`)), 'w').length) acted++;
   }
-  // At or above the threshold nothing changes: Fate always acts.
-  for (const n of [FULL_FORCE_AT, 10, 15, 16]) {
-    assert(teleportChance(n, FULL_FORCE_AT) === 1, `Fate must always act with ${n} pieces`);
+  assert(acted === TRIALS, `Fate must act every turn above the line, acted ${acted}/${TRIALS}`);
+
+  // Exactly one piece over the line: still every single time.
+  const edge = '4k3/8/8/8/8/P7/PPPPPPPP/4K3 b - - 0 1'; // 2 kings + 9 pawns = 11
+  const edgeBoard = new Chess(edge);
+  assert(countPieces(edgeBoard) === FATE_STOPS_AT + 1, `edge fen has ${countPieces(edgeBoard)} pieces, want ${FATE_STOPS_AT + 1}`);
+  let edgeActed = 0;
+  for (let i = 0; i < TRIALS; i++) {
+    const board = new Chess(edge);
+    if (runTeleportPhase(board, makeRng(seedFromString(`edge-${i}`)), 'w').length) edgeActed++;
   }
-  assert(teleportChance(0, FULL_FORCE_AT) === 0, 'no pieces means no teleport');
-  ok(`per-piece disruption is a flat 1/${FULL_FORCE_AT} below the threshold and unchanged above it`);
+  assert(edgeActed === TRIALS, `one piece above the line must still always act, acted ${edgeActed}/${TRIALS}`);
+  ok(`Fate acts on every single turn while more than ${FATE_STOPS_AT} pieces remain`);
 }
 
-// Measured, not just derived: a lone queen should sit still most turns.
 {
-  const fen = '4k3/8/8/8/8/8/8/3QK3 b - - 0 1';
-  const TRIALS = 8000;
-  let moved = 0;
-  for (let i = 0; i < TRIALS; i++) {
-    const board = new Chess(fen);
-    const events = runTeleportPhase(board, makeRng(seedFromString(`lone-${i}`)), 'w');
-    if (events.length) moved++;
+  // At the line and below: never, no matter the seed or how many pieces the
+  // mover still owns.
+  const TRIALS = 3000;
+  for (const [label, fen] of [
+    ['exactly at the line', '4k3/8/8/8/8/8/PPPPPPPP/4K3 b - - 0 1'], // 2 kings + 8 pawns = 10
+    ['deep endgame', '4k3/8/8/8/8/8/8/3QK3 b - - 0 1'],
+  ]) {
+    const board0 = new Chess(fen);
+    assert(countPieces(board0) <= FATE_STOPS_AT, `${label} has ${countPieces(board0)} pieces, expected <= ${FATE_STOPS_AT}`);
+    let acted = 0;
+    for (let i = 0; i < TRIALS; i++) {
+      const board = new Chess(fen);
+      if (runTeleportPhase(board, makeRng(seedFromString(`below-${label}-${i}`)), 'w').length) acted++;
+    }
+    assert(acted === 0, `${label}: Fate acted ${acted}/${TRIALS} times below the line`);
+    assert(!fateIsActive(board0), `${label} should report Fate inactive`);
   }
-  const rate = moved / TRIALS;
-  const expected = 1 / FULL_FORCE_AT;
-  console.log(`  lone queen moved on ${(rate * 100).toFixed(1)}% of turns (target ${(expected * 100).toFixed(1)}%)`);
-  assert(Math.abs(rate - expected) < 0.02, `lone queen disruption ${rate}, expected about ${expected}`);
-  ok('a lone piece is left alone most turns instead of every turn');
+  ok(`Fate never acts once ${FATE_STOPS_AT} or fewer pieces remain`);
 }
 
-// A full army is completely unaffected by the change.
+// The property that makes it a real rule rather than a mood: once it stops it
+// can never start again, because the piece count never goes up.
 {
-  const fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1';
-  const TRIALS = 2000;
-  let moved = 0;
-  for (let i = 0; i < TRIALS; i++) {
-    const board = new Chess(fen);
-    if (runTeleportPhase(board, makeRng(seedFromString(`full-${i}`)), 'w').length) moved++;
+  let stopsSeen = 0;
+  let restarts = 0;
+  for (let g = 0; g < 60; g++) {
+    const m = new ChaosMatch(`monotone-${g}`);
+    const mover = makeRng(seedFromString(`monotone-mover-${g}`));
+    let everStopped = false;
+    let lastCount = Infinity;
+    for (let step = 0; step < 160; step++) {
+      if (m.status().over) break;
+      const moves = m.legalMoves();
+      const mv = moves[mover.int(moves.length)];
+      m.applyMove({ from: mv.from, to: mv.to, promotion: mv.promotion });
+      const events = m.teleportIfDue() || [];
+      const f = m.fateState();
+      // piece count must never increase, which is what makes the stop final
+      assert(f.onBoard <= lastCount, `piece count rose from ${lastCount} to ${f.onBoard} g${g} s${step}`);
+      lastCount = f.onBoard;
+      if (!f.active) { if (!everStopped) stopsSeen++; everStopped = true; }
+      if (everStopped && events.length) restarts++;
+    }
   }
-  assert(moved === TRIALS, `Fate must act on every turn with a full army, acted ${moved}/${TRIALS}`);
-  ok('a full army still gets a teleport every single turn');
+  console.log(`  games that reached the stop: ${stopsSeen}/60, restarts after stopping: ${restarts}`);
+  assert(stopsSeen > 0, 'no game reached the stop, so the rule was never exercised');
+  assert(restarts === 0, `Fate restarted after stopping ${restarts} times`);
+  ok('once Fate stops it never acts again for the rest of the game');
 }
 
 summary('fairness.test.mjs');
