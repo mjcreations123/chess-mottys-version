@@ -17,16 +17,16 @@ const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const BOTS = {
   easy: {
-    name: 'MottyBot', label: 'Casual', level: 'easy', minThink: 800,
-    blurb: 'A relaxed opponent that still notices free pieces.',
+    name: 'MottyBot', label: 'Casual', level: 'easy', minThink: 600,
+    blurb: 'Looks two moves ahead and lets things slide. Beatable on purpose.',
   },
   medium: {
-    name: 'MottyBot', label: 'Club', level: 'medium', minThink: 1100,
-    blurb: 'A patient club-level search with tactical awareness.',
+    name: 'MottyBot', label: 'Club', level: 'medium', minThink: 900,
+    blurb: 'Six moves ahead. Punishes a loose piece and rarely misses a tactic.',
   },
   hard: {
-    name: 'MottyBot', label: 'Expert', level: 'hard', minThink: 1400,
-    blurb: 'The deepest search. It takes time and plays to win.',
+    name: 'MottyBot', label: 'Expert', level: 'hard', minThink: 1200,
+    blurb: 'Searches as deep as its clock allows and never blunders on purpose.',
   },
 };
 

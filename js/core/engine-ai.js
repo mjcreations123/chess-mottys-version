@@ -1,29 +1,28 @@
-// Fair chess engine: negamax + alpha-beta + iterative deepening over the
-// vendored chess.js. No cheating anywhere. It cannot see the future, and it
-// cannot see teleports coming, exactly like you.
+// MottyBot's brain: negamax with alpha-beta, principal variation search,
+// quiescence, killer/history move ordering and check extensions, running on the
+// 0x88 board in fastboard.js.
+//
+// The search deliberately knows nothing about the teleport rule. It plays the
+// position in front of it as hard as it can; the magic is applied afterwards by
+// the rules engine and is not something anyone can plan around.
 
 import { Chess } from '../vendor/chess.js';
+import {
+  FastBoard, moveFrom, moveTo, movePromo, moveKind, moveToUci,
+  KIND_EP, EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
+  WHITE, colorOf, typeOf, fileOf, rankOf,
+} from './fastboard.js';
 import { makeRng, seedFromString } from './rng.js';
 
-const VAL = { p: 100, n: 310, b: 330, r: 500, q: 900, k: 0 };
+const VAL = [0, 100, 320, 330, 500, 950, 0];
 const MATE = 100000;
+const MATE_THRESHOLD = MATE - 1000;
+const MAX_PLY = 64;
 const ABORT = Symbol('abort');
-const TT_LIMIT = 90000;
 
-const KING_END = [
-  -50, -40, -30, -20, -20, -30, -40, -50,
-  -30, -20, -10,   0,   0, -10, -20, -30,
-  -30, -10,  20,  30,  30,  20, -10, -30,
-  -30, -10,  30,  40,  40,  30, -10, -30,
-  -30, -10,  30,  40,  40,  30, -10, -30,
-  -30, -10,  20,  30,  30,  20, -10, -30,
-  -30, -30,   0,   0,   0,   0, -30, -30,
-  -50, -30, -30, -30, -30, -30, -30, -50,
-];
-
-// Simplified evaluation tables (Michniewski), index 0 = a8 ... 63 = h1.
+/* ---------------- evaluation tables (index 0 = a8, 63 = h1) ------------- */
 const PST = {
-  p: [
+  [PAWN]: [
     0, 0, 0, 0, 0, 0, 0, 0,
     50, 50, 50, 50, 50, 50, 50, 50,
     10, 10, 20, 30, 30, 20, 10, 10,
@@ -31,9 +30,8 @@ const PST = {
     0, 0, 0, 20, 20, 0, 0, 0,
     5, -5, -10, 0, 0, -10, -5, 5,
     5, 10, 10, -20, -20, 10, 10, 5,
-    0, 0, 0, 0, 0, 0, 0, 0,
-  ],
-  n: [
+    0, 0, 0, 0, 0, 0, 0, 0],
+  [KNIGHT]: [
     -50, -40, -30, -30, -30, -30, -40, -50,
     -40, -20, 0, 0, 0, 0, -20, -40,
     -30, 0, 10, 15, 15, 10, 0, -30,
@@ -41,9 +39,8 @@ const PST = {
     -30, 0, 15, 20, 20, 15, 0, -30,
     -30, 5, 10, 15, 15, 10, 5, -30,
     -40, -20, 0, 5, 5, 0, -20, -40,
-    -50, -40, -30, -30, -30, -30, -40, -50,
-  ],
-  b: [
+    -50, -40, -30, -30, -30, -30, -40, -50],
+  [BISHOP]: [
     -20, -10, -10, -10, -10, -10, -10, -20,
     -10, 0, 0, 0, 0, 0, 0, -10,
     -10, 0, 5, 10, 10, 5, 0, -10,
@@ -51,9 +48,8 @@ const PST = {
     -10, 0, 10, 10, 10, 10, 0, -10,
     -10, 10, 10, 10, 10, 10, 10, -10,
     -10, 5, 0, 0, 0, 0, 5, -10,
-    -20, -10, -10, -10, -10, -10, -10, -20,
-  ],
-  r: [
+    -20, -10, -10, -10, -10, -10, -10, -20],
+  [ROOK]: [
     0, 0, 0, 0, 0, 0, 0, 0,
     5, 10, 10, 10, 10, 10, 10, 5,
     -5, 0, 0, 0, 0, 0, 0, -5,
@@ -61,9 +57,8 @@ const PST = {
     -5, 0, 0, 0, 0, 0, 0, -5,
     -5, 0, 0, 0, 0, 0, 0, -5,
     -5, 0, 0, 0, 0, 0, 0, -5,
-    0, 0, 0, 5, 5, 0, 0, 0,
-  ],
-  q: [
+    0, 0, 0, 5, 5, 0, 0, 0],
+  [QUEEN]: [
     -20, -10, -10, -5, -5, -10, -10, -20,
     -10, 0, 0, 0, 0, 0, 0, -10,
     -10, 0, 5, 5, 5, 5, 0, -10,
@@ -71,9 +66,8 @@ const PST = {
     0, 0, 5, 5, 5, 5, 0, -5,
     -10, 5, 5, 5, 5, 5, 0, -10,
     -10, 0, 5, 0, 0, 0, 0, -10,
-    -20, -10, -10, -5, -5, -10, -10, -20,
-  ],
-  k: [
+    -20, -10, -10, -5, -5, -10, -10, -20],
+  [KING]: [
     -30, -40, -40, -50, -50, -40, -40, -30,
     -30, -40, -40, -50, -50, -40, -40, -30,
     -30, -40, -40, -50, -50, -40, -40, -30,
@@ -81,180 +75,172 @@ const PST = {
     -20, -30, -30, -40, -40, -30, -30, -20,
     -10, -20, -20, -20, -20, -20, -20, -10,
     20, 20, 0, 0, 0, 0, 20, 20,
-    20, 30, 10, 0, 0, 10, 30, 20,
-  ],
+    20, 30, 10, 0, 0, 10, 30, 20],
 };
+const KING_END = [
+  -50, -40, -30, -20, -20, -30, -40, -50,
+  -30, -20, -10, 0, 0, -10, -20, -30,
+  -30, -10, 20, 30, 30, 20, -10, -30,
+  -30, -10, 30, 40, 40, 30, -10, -30,
+  -30, -10, 30, 40, 40, 30, -10, -30,
+  -30, -10, 20, 30, 30, 20, -10, -30,
+  -30, -30, 0, 0, 0, 0, -30, -30,
+  -50, -30, -30, -30, -30, -30, -30, -50];
 
-// Iterative deepening means maxDepth is an ambition, not a promise: the search
-// keeps the best move from the last COMPLETED depth when timeMs runs out. So
-// raising both makes the bot genuinely stronger on quiet positions without
-// ever risking a stall.
-// endgameBonus caps how much extra depth a level may claim in a sparse
-// position. Hard gets the lot so it can finish a won endgame; easy gets very
-// little, because an easy bot that suddenly plays perfect endgames would take
-// away exactly the games a beginner can win.
+// Manhattan distance from the centre: 0 in the middle, 6 in a corner.
+const CENTER_DIST = new Int8Array(64);
+for (let r = 0; r < 8; r++) {
+  for (let f = 0; f < 8; f++) CENTER_DIST[r * 8 + f] = Math.max(3 - f, f - 4) + Math.max(3 - r, r - 4);
+}
+
+const pstIndex = (sq, color) => (color === WHITE ? (7 - rankOf(sq)) * 8 + fileOf(sq) : rankOf(sq) * 8 + fileOf(sq));
+
+/* ---------------- levels ---------------- */
+// Three genuinely different opponents. Depth and time set the ceiling; the
+// blunder settings decide how often the weaker ones fail to use it.
 export const LEVELS = {
-  easy: { maxDepth: 2, timeMs: 600, jitter: 70, randomChance: 0.14, quiesce: false, endgameBonus: 2 },
-  medium: { maxDepth: 4, timeMs: 1800, jitter: 10, randomChance: 0, quiesce: true, endgameBonus: 5 },
-  hard: { maxDepth: 7, timeMs: 4200, jitter: 0, randomChance: 0, quiesce: true, endgameBonus: 10 },
+  easy: {
+    label: 'Casual', maxDepth: 2, timeMs: 400,
+    blunderChance: 0.30, spread: 120, endgameBonus: 2,
+  },
+  medium: {
+    label: 'Club', maxDepth: 6, timeMs: 1400,
+    blunderChance: 0.06, spread: 45, endgameBonus: 6,
+  },
+  hard: {
+    label: 'Expert', maxDepth: 24, timeMs: 3000,
+    blunderChance: 0, spread: 0, endgameBonus: 12,
+  },
 };
 
-// Manhattan distance from the middle of the board: 0 in the centre, 6 in a
-// corner. Used to herd a bare king toward the edge where it can be mated.
-const CENTER_DIST = (() => {
-  const table = new Int8Array(64);
-  for (let r = 0; r < 8; r++) {
-    for (let f = 0; f < 8; f++) {
-      table[r * 8 + f] = Math.max(3 - f, f - 4) + Math.max(3 - r, r - 4);
-    }
-  }
-  return table;
-})();
+/* ---------------- evaluation ---------------- */
+function evaluate(board) {
+  const sq = board.squares;
+  let score = 0;                 // white's point of view
+  let forceW = 0, forceB = 0;    // non-king, non-pawn+pawn material
+  let nonPawn = 0;
+  let bishopsW = 0, bishopsB = 0;
+  const pawnFilesW = [0, 0, 0, 0, 0, 0, 0, 0];
+  const pawnFilesB = [0, 0, 0, 0, 0, 0, 0, 0];
+  let kingW = -1, kingB = -1;
 
-function evaluate(chess) {
-  // score from the perspective of the side to move
-  let score = 0;
-  let forceW = 0;
-  let forceB = 0;
-  let kingW = -1;
-  let kingB = -1;
-  const rows = chess.board();
-  let nonPawnMaterial = 0;
-  const bishops = { w: 0, b: 0 };
-  const pawnFiles = { w: Array(8).fill(0), b: Array(8).fill(0) };
-  for (const row of rows) {
-    for (const cell of row) {
-      if (!cell) continue;
-      if (cell.type === 'b') bishops[cell.color]++;
-      if (cell.type === 'p') pawnFiles[cell.color][cell.square.charCodeAt(0) - 97]++;
-      else if (cell.type !== 'k') nonPawnMaterial += VAL[cell.type];
+  for (let s = 0; s < 128; s++) {
+    if (s & 0x88) { s += 7; continue; }
+    const piece = sq[s];
+    if (piece === EMPTY) continue;
+    const color = colorOf(piece);
+    const type = typeOf(piece);
+    if (type === KING) { if (color === WHITE) kingW = s; else kingB = s; continue; }
+    const base = VAL[type];
+    if (color === WHITE) forceW += base; else forceB += base;
+    if (type !== PAWN) nonPawn += base;
+    if (type === BISHOP) { if (color === WHITE) bishopsW++; else bishopsB++; }
+    if (type === PAWN) {
+      if (color === WHITE) pawnFilesW[fileOf(s)]++; else pawnFilesB[fileOf(s)]++;
     }
-  }
-  const endgame = nonPawnMaterial <= 2200;
-  for (let r = 0; r < 8; r++) {
-    const row = rows[r];
-    for (let f = 0; f < 8; f++) {
-      const cell = row[f];
-      if (!cell) continue;
-      const base = VAL[cell.type];
-      const at = r * 8 + f;
-      if (cell.type === 'k') {
-        if (cell.color === 'w') kingW = at; else kingB = at;
-      } else if (cell.color === 'w') forceW += base;
-      else forceB += base;
-      const idx = cell.color === 'w' ? at : (7 - r) * 8 + f;
-      const positional = cell.type === 'k' && endgame ? KING_END[idx] : PST[cell.type][idx];
-      const v = base + positional;
-      score += cell.color === 'w' ? v : -v;
-    }
+    const v = base + PST[type][pstIndex(s, color)];
+    score += color === WHITE ? v : -v;
   }
 
-  // Small, stable strategic terms make quiet play substantially less random.
-  if (bishops.w >= 2) score += 28;
-  if (bishops.b >= 2) score -= 28;
-  for (const color of ['w', 'b']) {
-    let structure = 0;
-    for (let file = 0; file < 8; file++) {
-      const count = pawnFiles[color][file];
-      if (count > 1) structure -= (count - 1) * 12;
-      if (count && !pawnFiles[color][file - 1] && !pawnFiles[color][file + 1]) structure -= count * 8;
-    }
-    score += color === 'w' ? structure : -structure;
+  const endgame = nonPawn <= 2200;
+  const kingTable = endgame ? KING_END : PST[KING];
+  if (kingW >= 0) score += kingTable[pstIndex(kingW, WHITE)];
+  if (kingB >= 0) score -= kingTable[pstIndex(kingB, 1)];
+
+  if (bishopsW >= 2) score += 28;
+  if (bishopsB >= 2) score -= 28;
+
+  for (let f = 0; f < 8; f++) {
+    if (pawnFilesW[f] > 1) score -= (pawnFilesW[f] - 1) * 12;
+    if (pawnFilesB[f] > 1) score += (pawnFilesB[f] - 1) * 12;
+    const isolatedW = pawnFilesW[f] && !(pawnFilesW[f - 1] || 0) && !(pawnFilesW[f + 1] || 0);
+    const isolatedB = pawnFilesB[f] && !(pawnFilesB[f - 1] || 0) && !(pawnFilesB[f + 1] || 0);
+    if (isolatedW) score -= pawnFilesW[f] * 8;
+    if (isolatedB) score += pawnFilesB[f] * 8;
   }
 
-  // Mating drive. Against a bare king, material never changes and every quiet
-  // move evaluates the same, so the search shuffles forever and the game dies
-  // by the fifty-move rule. Reward pushing the lone king to the edge and
-  // walking the other king in beside it; that is the whole technique.
+  // Mating drive: against a bare king material is flat, so herd it to the edge
+  // and walk the other king in, otherwise a won endgame shuffles to a draw.
   const lead = forceW - forceB;
   if (Math.abs(lead) >= 300 && kingW >= 0 && kingB >= 0) {
-    const strongIsWhite = lead > 0;
-    const weakForce = strongIsWhite ? forceB : forceW;
-    if (weakForce <= 100) {
-      const loser = strongIsWhite ? kingB : kingW;
-      const winner = strongIsWhite ? kingW : kingB;
-      const apart = Math.abs((loser >> 3) - (winner >> 3)) + Math.abs((loser & 7) - (winner & 7));
-      const drive = 4.7 * CENTER_DIST[loser] + 1.6 * (14 - apart);
-      score += strongIsWhite ? drive : -drive;
+    const strongWhite = lead > 0;
+    const weak = strongWhite ? forceB : forceW;
+    if (weak <= 100) {
+      const loser = strongWhite ? kingB : kingW;
+      const winner = strongWhite ? kingW : kingB;
+      const apart = Math.abs(rankOf(loser) - rankOf(winner)) + Math.abs(fileOf(loser) - fileOf(winner));
+      const drive = 4.7 * CENTER_DIST[(7 - rankOf(loser)) * 8 + fileOf(loser)] + 1.6 * (14 - apart);
+      score += strongWhite ? drive : -drive;
     }
   }
 
-  let view = chess.turn() === 'w' ? score : -score;
-  if (chess.isCheck()) view -= 32;
-  return view;
+  return board.turn === WHITE ? score : -score;
 }
 
-function orderMoves(moves, preferUci) {
-  return moves.slice().sort((a, b) => {
-    const au = a.from + a.to + (a.promotion || '');
-    const bu = b.from + b.to + (b.promotion || '');
-    if (preferUci) {
-      if (au === preferUci) return -1;
-      if (bu === preferUci) return 1;
+/* ---------------- search ---------------- */
+class Search {
+  constructor(board, deadline) {
+    this.board = board;
+    this.deadline = deadline;
+    this.nodes = 0;
+    this.killers = new Int32Array(MAX_PLY * 2);
+    this.history = new Int32Array(16 * 128);
+    this.moveLists = [];
+    for (let i = 0; i < MAX_PLY + 8; i++) this.moveLists.push([]);
+  }
+
+  #checkTime() {
+    if ((++this.nodes & 2047) === 0 && Date.now() > this.deadline) throw ABORT;
+  }
+
+  // Higher scores are searched first. Captures by MVV-LVA, then the two killer
+  // moves for this ply, then the history heuristic.
+  #scoreMove(move, ply, ttMove) {
+    if (move === ttMove) return 1 << 24;
+    const to = moveTo(move);
+    const victim = this.board.squares[to];
+    if (victim !== EMPTY || moveKind(move) === KIND_EP) {
+      const attacker = this.board.squares[moveFrom(move)];
+      const victimVal = victim === EMPTY ? VAL[PAWN] : VAL[typeOf(victim)];
+      return (1 << 20) + victimVal * 16 - VAL[typeOf(attacker)];
     }
-    const av = (a.captured ? VAL[a.captured] * 10 - VAL[a.piece] : 0) + (a.promotion ? 800 : 0);
-    const bv = (b.captured ? VAL[b.captured] * 10 - VAL[b.piece] : 0) + (b.promotion ? 800 : 0);
-    return bv - av;
-  });
-}
-
-// With few pieces on the board the branching factor collapses, so the same
-// time budget buys far more depth. Without this the search is too shallow to
-// see a mating net and a won endgame shuffles into a fifty-move draw.
-function endgameDepthBonus(fen) {
-  const placement = fen.split(' ')[0];
-  let pieces = 0;
-  for (let i = 0; i < placement.length; i++) {
-    const code = placement.charCodeAt(i);
-    if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) pieces++;
-  }
-  if (pieces <= 5) return 10;
-  if (pieces <= 7) return 8;
-  if (pieces <= 10) return 5;
-  if (pieces <= 14) return 2;
-  return 0;
-}
-
-export function think(fen, level, seed, opts = {}) {
-  const cfg = { ...LEVELS[level] || LEVELS.medium, ...opts };
-  // Iterative deepening still respects timeMs, so a deeper ceiling can never
-  // stall: it just uses the budget better when the position is simple.
-  cfg.maxDepth += Math.min(endgameDepthBonus(fen), cfg.endgameBonus ?? 10);
-  const rng = makeRng(seedFromString(String(seed ?? 'mottybot')));
-  const chess = new Chess(fen);
-  const rootMoves = chess.moves({ verbose: true });
-  if (!rootMoves.length) return null;
-  if (rootMoves.length === 1) return uciOf(rootMoves[0]);
-
-  if (cfg.randomChance && rng.next() < cfg.randomChance) {
-    return uciOf(rootMoves[rng.int(rootMoves.length)]);
+    const promo = movePromo(move);
+    if (promo) return (1 << 19) + VAL[promo];
+    if (move === this.killers[ply * 2]) return 1 << 18;
+    if (move === this.killers[ply * 2 + 1]) return (1 << 18) - 1;
+    return this.history[this.board.squares[moveFrom(move)] * 128 + to];
   }
 
-  const deadline = Date.now() + cfg.timeMs;
-  let nodes = 0;
-  const table = new Map();
-  const fromTable = (score, ply) => score > MATE - 1000 ? score - ply : score < -MATE + 1000 ? score + ply : score;
-  const forTable = (score, ply) => score > MATE - 1000 ? score + ply : score < -MATE + 1000 ? score - ply : score;
+  #sort(moves, ply, ttMove) {
+    const scores = new Array(moves.length);
+    for (let i = 0; i < moves.length; i++) scores[i] = this.#scoreMove(moves[i], ply, ttMove);
+    // insertion sort: move lists are short and mostly ordered already
+    for (let i = 1; i < moves.length; i++) {
+      const m = moves[i];
+      const s = scores[i];
+      let j = i - 1;
+      while (j >= 0 && scores[j] < s) { moves[j + 1] = moves[j]; scores[j + 1] = scores[j]; j--; }
+      moves[j + 1] = m;
+      scores[j + 1] = s;
+    }
+  }
 
-  const checkTime = () => {
-    if ((++nodes & 1023) === 0 && Date.now() > deadline) throw ABORT;
-  };
-
-  // Fail-SOFT. Returning the incoming alpha/beta bound instead of a real score
-  // poisons the parent: under a narrow window an ordinary position comes back
-  // wearing a mate score, and quiet king moves get preferred over actual mate.
-  function quiesce(alpha, beta, depthLeft) {
-    checkTime();
-    const stand = evaluate(chess);
+  quiesce(alpha, beta, ply) {
+    this.#checkTime();
+    const stand = evaluate(this.board);
     if (stand >= beta) return stand;
     let best = stand;
     if (stand > alpha) alpha = stand;
-    if (depthLeft <= 0) return best;
-    const caps = chess.moves({ verbose: true }).filter((m) => m.captured);
-    for (const m of orderMoves(caps)) {
-      chess.move(m);
-      const score = -quiesce(-beta, -alpha, depthLeft - 1);
-      chess.undo();
+    if (ply >= MAX_PLY - 1) return best;
+
+    const moves = this.moveLists[ply];
+    this.board.generate(moves, true);
+    this.#sort(moves, ply, 0);
+    for (let i = 0; i < moves.length; i++) {
+      const move = moves[i];
+      if (!this.board.makeIfLegal(move)) continue;
+      const score = -this.quiesce(-beta, -alpha, ply + 1);
+      this.board.unmake();
       if (score > best) best = score;
       if (score > alpha) alpha = score;
       if (alpha >= beta) break;
@@ -262,99 +248,142 @@ export function think(fen, level, seed, opts = {}) {
     return best;
   }
 
-  function negamax(depth, alpha, beta, plyFromRoot) {
-    checkTime();
-    if (depth === 0) {
-      return cfg.quiesce ? quiesce(alpha, beta, 6) : evaluate(chess);
-    }
-    const key = chess.fen();
-    const alphaStart = alpha;
-    const betaStart = beta;
-    const cached = table.get(key);
-    if (cached && cached.depth >= depth) {
-      const cachedScore = fromTable(cached.score, plyFromRoot);
-      if (cached.flag === 'exact') return cachedScore;
-      if (cached.flag === 'lower') alpha = Math.max(alpha, cachedScore);
-      if (cached.flag === 'upper') beta = Math.min(beta, cachedScore);
-      if (alpha >= beta) return cachedScore;
+  negamax(depth, alpha, beta, ply) {
+    this.#checkTime();
+    const inCheck = this.board.inCheck();
+    if (inCheck) depth++; // never evaluate a position with checks hanging over it
+    if (depth <= 0) return this.quiesce(alpha, beta, ply);
+
+    const moves = this.moveLists[ply];
+    this.board.generate(moves);
+    this.#sort(moves, ply, 0);
+
+    let best = -Infinity;
+    let legal = 0;
+    let bestMove = 0;
+    for (let i = 0; i < moves.length; i++) {
+      const move = moves[i];
+      if (!this.board.makeIfLegal(move)) continue;
+      legal++;
+      let score;
+      if (legal === 1) {
+        score = -this.negamax(depth - 1, -beta, -alpha, ply + 1);
+      } else {
+        score = -this.negamax(depth - 1, -alpha - 1, -alpha, ply + 1);
+        if (score > alpha && score < beta) score = -this.negamax(depth - 1, -beta, -alpha, ply + 1);
+      }
+      this.board.unmake();
+
+      if (score > best) { best = score; bestMove = move; }
+      if (score > alpha) alpha = score;
+      if (alpha >= beta) {
+        // quiet move that caused a cutoff: remember it for sibling nodes
+        if (this.board.squares[moveTo(move)] === EMPTY && moveKind(move) !== KIND_EP) {
+          const k = ply * 2;
+          if (this.killers[k] !== move) { this.killers[k + 1] = this.killers[k]; this.killers[k] = move; }
+          this.history[this.board.squares[moveFrom(move)] * 128 + moveTo(move)] += depth * depth;
+        }
+        break;
+      }
     }
 
-    const moves = chess.moves({ verbose: true });
-    if (!moves.length) {
-      return chess.isCheck() ? -MATE + plyFromRoot : 0;
-    }
-    let best = -Infinity;
-    let bestMove = null;
-    for (const m of orderMoves(moves, cached?.move)) {
-      chess.move(m);
-      const score = -negamax(depth - 1, -beta, -alpha, plyFromRoot + 1);
-      chess.undo();
-      if (score > best) { best = score; bestMove = uciStr(uciOf(m)); }
-      if (score > alpha) alpha = score;
-      if (alpha >= beta) break;
-    }
-    const flag = best <= alphaStart ? 'upper' : best >= betaStart ? 'lower' : 'exact';
-    if (table.size >= TT_LIMIT) table.clear();
-    table.set(key, { depth, score: forTable(best, plyFromRoot), flag, move: bestMove });
+    if (legal === 0) return inCheck ? -MATE + ply : 0; // mate or stalemate
     return best;
   }
+}
 
-  let bestUci = uciOf(rootMoves[0]);
-  let lastCompletedBest = bestUci;
+/* ---------------- public entry ---------------- */
+function endgameDepthBonus(board) {
+  let pieces = 0;
+  for (let s = 0; s < 128; s++) {
+    if (s & 0x88) { s += 7; continue; }
+    if (board.squares[s] !== EMPTY) pieces++;
+  }
+  if (pieces <= 5) return 12;
+  if (pieces <= 7) return 10;
+  if (pieces <= 10) return 6;
+  if (pieces <= 14) return 3;
+  return 0;
+}
+
+export function think(fen, level, seed, opts = {}) {
+  const cfg = { ...(LEVELS[level] || LEVELS.medium), ...opts };
+  const rng = makeRng(seedFromString(String(seed ?? 'mottybot')));
+  const board = new FastBoard(fen);
+  const rootMoves = board.legalMoves();
+  if (!rootMoves.length) return null;
+
+  cfg.maxDepth += Math.min(endgameDepthBonus(board), cfg.endgameBonus ?? 0);
+  const deadline = Date.now() + cfg.timeMs;
+  const search = new Search(board, deadline);
+
+  const scored = rootMoves.map((move) => ({ move, score: -Infinity }));
+  let completedDepth = 0;
 
   for (let depth = 1; depth <= cfg.maxDepth; depth++) {
-    let iterBest = null;
-    let iterBestRank = -Infinity;
-    let alpha = -Infinity; // TRUE scores only; jitter must never touch this
+    // search last iteration's best first
+    scored.sort((a, b) => b.score - a.score);
+    let alpha = -Infinity;
+    let aborted = false;
+    const fresh = scored.map((e) => ({ move: e.move, score: -Infinity }));
     try {
-      // search the previous iteration's best move first: that is most of what
-      // makes iterative deepening pay for itself
-      let first = true;
-      for (const m of orderMoves(rootMoves, uciStr(lastCompletedBest))) {
-        chess.move(m);
+      for (let i = 0; i < fresh.length; i++) {
+        const entry = fresh[i];
+        board.makeIfLegal(entry.move);
         let score;
-        if (first || alpha === -Infinity) {
-          score = -negamax(depth - 1, -Infinity, Infinity, 1);
+        if (i === 0) {
+          score = -search.negamax(depth - 1, -Infinity, Infinity, 1);
         } else {
-          // Null-window scout. A fail-high result is only a BOUND, not a
-          // score, and a bound can come back wearing a mate magnitude. Any
-          // move that beats alpha must be re-searched with a full window
-          // before its number is believed.
-          score = -negamax(depth - 1, -alpha - 1, -alpha, 1);
-          if (score > alpha) score = -negamax(depth - 1, -Infinity, Infinity, 1);
+          score = -search.negamax(depth - 1, -alpha - 1, -alpha, 1);
+          if (score > alpha) score = -search.negamax(depth - 1, -Infinity, Infinity, 1);
         }
-        chess.undo();
-        first = false;
+        board.unmake();
+        entry.score = score;
         if (score > alpha) alpha = score;
-
-        // Jitter is a handicap knob for the weaker levels. It ranks moves, it
-        // does not score them, and it never argues with a forced mate.
-        const nearMate = Math.abs(score) > MATE - 1000;
-        const rank = (cfg.jitter && !nearMate)
-          ? score + Math.round((rng.next() - 0.5) * 2 * cfg.jitter)
-          : score;
-        if (rank > iterBestRank) {
-          iterBestRank = rank;
-          iterBest = uciOf(m);
-        }
-      }
-      if (iterBest) {
-        lastCompletedBest = iterBest;
-        bestUci = iterBest;
       }
     } catch (err) {
       if (err !== ABORT) throw err;
-      break; // keep best from last completed depth
+      aborted = true;
     }
-    if (Date.now() > deadline) break;
+    if (!aborted) {
+      for (let i = 0; i < fresh.length; i++) scored[i] = fresh[i];
+      completedDepth = depth;
+      if (cfg.stats) {
+        cfg.stats.depth = depth;
+        cfg.stats.nodes = search.nodes;
+        cfg.stats.ms = Date.now() - (deadline - cfg.timeMs);
+        cfg.stats.score = Math.max(...fresh.map((e) => e.score));
+      }
+      // a forced mate is not going to get better with more thinking
+      if (Math.abs(alpha) > MATE_THRESHOLD) break;
+    }
+    if (aborted || Date.now() > deadline) break;
   }
-  return bestUci;
-}
 
-function uciOf(m) {
-  return { from: m.from, to: m.to, promotion: m.promotion || undefined };
-}
+  scored.sort((a, b) => b.score - a.score);
+  let chosen = scored[0];
 
-function uciStr(m) {
-  return m ? m.from + m.to + (m.promotion || '') : null;
+  // Weaker levels: sometimes settle for a move that is merely playable. Never
+  // throw away a forced mate, and never deliberately walk into one.
+  if (cfg.blunderChance && scored.length > 1 && Math.abs(chosen.score) < MATE_THRESHOLD) {
+    if (rng.next() < cfg.blunderChance) {
+      const cutoff = chosen.score - cfg.spread;
+      const pool = scored.filter((e) => e.score >= cutoff && e.score > -MATE_THRESHOLD);
+      if (pool.length > 1) chosen = pool[rng.int(pool.length)];
+    }
+  }
+
+  if (cfg.stats) cfg.stats.completedDepth = completedDepth;
+
+  const picked = moveToUci(chosen.move);
+  // Safety net: the authoritative rules engine has the final say. If the fast
+  // board and chess.js ever disagree, play something chess.js accepts.
+  const referee = new Chess(fen);
+  const legal = referee.moves({ verbose: true });
+  if (!legal.some((m) => m.from === picked.from && m.to === picked.to
+    && (m.promotion || undefined) === picked.promotion)) {
+    const fallback = legal[0];
+    return fallback ? { from: fallback.from, to: fallback.to, promotion: fallback.promotion || undefined } : null;
+  }
+  return picked;
 }
