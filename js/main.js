@@ -659,19 +659,22 @@ function endGame() {
 
 function showResultModal() {
   const { status, outcome, moves, teleports, captures, signOff } = state.result;
-  const title = outcome === 'draw' ? 'Draw.' : outcome === 'win' ? 'You won.' : 'MottyBot won.';
+  // Speak to the player. "MottyBot won" makes you work out what happened to
+  // you; "You lost" does not.
+  const headline = outcome === 'win' ? 'You won' : outcome === 'loss' ? 'You lost' : 'Draw';
   const note = outcome === 'win'
     ? 'You read the chaos better. MottyBot is allowed to lose, and this time it did.'
     : outcome === 'loss'
-      ? 'The board changed. MottyBot adapted. Try the same magic again or roll a new one.'
+      ? 'The board changed. MottyBot adapted. Take the same magic again, or roll a new one.'
       : 'Nobody escaped the position with a win.';
   showModal(`
-    <div class="modal__head">
-      <div class="result-mark">${escapeHTML(reasonText(status, outcome))}</div>
-      <h2 id="modal-title">${title}</h2>
-      <p>${note}</p>
+    <div class="result-banner result-banner--${outcome}">
+      <span class="result-banner__reason">${escapeHTML(reasonText(status, outcome))}</span>
+      <h2 class="result-banner__title" id="modal-title">${headline}</h2>
+      <p class="result-banner__sub">against ${escapeHTML(state.bot.label)} MottyBot</p>
     </div>
     <div class="modal__body">
+      <p class="result-note">${note}</p>
       ${signOff ? `<p class="bot-quote">${escapeHTML(signOff)}<span>MottyBot</span></p>` : ''}
       <div class="result-stats">
         <div><strong>${moves}</strong><span>Moves</span></div>
@@ -679,37 +682,45 @@ function showResultModal() {
         <div><strong>${captures}</strong><span>Captures</span></div>
       </div>
       <div class="button-stack">
-        <button class="btn btn--primary" id="result-new">New chaos</button>
+        <button class="btn btn--primary" id="result-share">
+          <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 15V3"/><path d="M8 7l4-4 4 4"/></svg>
+          Share result
+        </button>
+        <button class="btn btn--secondary" id="result-new">Play again</button>
         <button class="btn btn--secondary" id="result-same">Replay the same magic</button>
-        <button class="btn btn--secondary" id="result-review">Review game</button>
-        <button class="btn btn--quiet" id="result-share">Share this challenge</button>
+        <button class="btn btn--quiet" id="result-review">Review the game</button>
       </div>
       <div class="copy-confirm" id="copy-confirm" aria-live="polite"></div>
     </div>`);
   $('result-new').onclick = () => { hideModal(); startBotGame(state.bot.level, state.myColor); };
   $('result-same').onclick = () => { const seed = state.match.seed; hideModal(); startBotGame(state.bot.level, state.myColor, { seed }); };
   $('result-review').onclick = () => { hideModal(); enterReplay(); };
-  $('result-share').onclick = shareChallenge;
+  $('result-share').onclick = shareResult;
 }
 
-async function shareChallenge() {
+function resultSentence() {
+  const { outcome, moves } = state.result;
+  const who = `${state.bot.label} MottyBot`;
+  const verb = outcome === 'win' ? `I beat ${who}`
+    : outcome === 'loss' ? `${who} beat me`
+      : `I drew with ${who}`;
+  return `${verb} at Chess (Motty's Version) in ${moves} moves. Real chess, except one of your own pieces teleports to a random square after every move you make.`;
+}
+
+async function shareResult() {
   const url = challengeURL();
-  const data = {
-    title: "Chess (Motty's Version)",
-    text: 'Play the same chaos seed against MottyBot.',
-    url,
-  };
+  const text = resultSentence();
+  const confirm = $('copy-confirm');
   try {
-    if (navigator.share) await navigator.share(data);
-    else {
-      await navigator.clipboard.writeText(url);
-      const confirm = $('copy-confirm');
-      if (confirm) confirm.textContent = 'Challenge link copied.';
+    if (navigator.share) {
+      await navigator.share({ title: "Chess (Motty's Version)", text, url });
+      return;
     }
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    if (confirm) confirm.textContent = 'Result and link copied.';
   } catch (error) {
     if (error?.name === 'AbortError') return;
-    const confirm = $('copy-confirm');
-    if (confirm) confirm.textContent = 'Copy the address from your browser to share it.';
+    if (confirm) confirm.textContent = 'Could not copy. The link is in your address bar.';
   }
 }
 

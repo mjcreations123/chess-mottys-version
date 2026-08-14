@@ -439,6 +439,46 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .rule-list b { color: var(--text); }
 .rule-mark { color: var(--magic); font-weight: 850; }
 .result-mark { color: var(--magic); font-size: 13px; font-weight: 800; margin-bottom: 5px; }
+
+/* The end of the game should be readable from across the room, and it should
+   say what happened to YOU rather than make you work it out. */
+.result-banner {
+  position: relative;
+  padding: 30px 58px 22px 23px;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+.result-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, var(--result-wash, transparent), transparent 78%);
+  pointer-events: none;
+}
+.result-banner > * { position: relative; }
+.result-banner__reason {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: var(--result-accent, var(--magic));
+}
+.result-banner__title {
+  margin: 6px 0 0;
+  font-size: clamp(38px, 8vw, 52px);
+  line-height: .98;
+  font-weight: 860;
+  letter-spacing: -.02em;
+  color: var(--text);
+}
+.result-banner__sub { margin: 7px 0 0; color: var(--muted); font-size: 14px; }
+
+.result-banner--win { --result-accent: var(--turn); --result-wash: rgba(228, 183, 93, .17); }
+.result-banner--loss { --result-accent: var(--danger); --result-wash: rgba(238, 116, 104, .15); }
+.result-banner--draw { --result-accent: var(--quiet); --result-wash: rgba(255, 255, 255, .05); }
+
+.result-note { margin: 0 0 14px; color: var(--muted); line-height: 1.5; }
 .result-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin: 2px 0 18px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .result-stats div { padding: 13px 7px; text-align: center; border-right: 1px solid var(--line); }
 .result-stats div:last-child { border: 0; }
@@ -572,6 +612,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .modal { max-height: calc(100dvh - 20px); border-radius: 11px 11px 8px 8px; }
   .modal__head { padding: 22px 55px 16px 19px; }
   .modal__head h2 { font-size: 25px; }
+  .result-banner { padding: 24px 52px 18px 19px; }
   .modal__body { padding: 17px 19px 20px; }
 }
 

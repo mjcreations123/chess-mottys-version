@@ -30,22 +30,25 @@ function match(a, b, gameSeed, aIsWhite) {
   return edge;
 }
 
+// Summed material edge rather than a win counter: two close games can both
+// finish inside a win margin and report a meaningless 0-0, which makes the
+// test flaky instead of informative. Total edge always says who was ahead.
 function series(strong, weak) {
-  let strongPoints = 0;
-  let weakPoints = 0;
+  let total = 0;
+  let decisive = 0;
   for (let g = 0; g < GAMES; g++) {
     const edge = match(strong, weak, `${strong}-${weak}-${g}`, g % 2 === 0);
-    if (edge > 2) strongPoints++;
-    else if (edge < -2) weakPoints++;
+    total += edge;
+    if (Math.abs(edge) > 2) decisive += edge > 0 ? 1 : -1;
   }
-  return { strongPoints, weakPoints };
+  return { total, decisive };
 }
 
 for (const [strong, weak] of [['hard', 'easy'], ['medium', 'easy'], ['hard', 'medium']]) {
-  const { strongPoints, weakPoints } = series(strong, weak);
-  console.log(`  ${strong} vs ${weak}: ${strongPoints} - ${weakPoints} over ${GAMES} games`);
-  assert(strongPoints > weakPoints,
-    `${strong} did not outplay ${weak} (${strongPoints}-${weakPoints}); the levels are not distinct`);
+  const { total, decisive } = series(strong, weak);
+  console.log(`  ${strong} vs ${weak}: material edge ${total > 0 ? '+' : ''}${total} over ${GAMES} games (decisive ${decisive >= 0 ? '+' : ''}${decisive})`);
+  assert(total > 0,
+    `${strong} did not outplay ${weak} (material edge ${total}); the levels are not distinct`);
 }
 ok('hard beats medium beats easy');
 
