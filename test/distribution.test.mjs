@@ -1,4 +1,4 @@
-// Statistical guard for the public claim that Fate is random. Each eligible
+// Statistical guard for the public claim that Magic is random. Each eligible
 // piece must have the same chance of being selected, independent of how many
 // empty destinations that piece has. Once selected, each of its destinations
 // must have the same chance as the others.
@@ -9,8 +9,8 @@ import { assert, ok, summary } from './helpers.mjs';
 
 const FEN = '7k/8/8/8/8/8/8/KNB5 b - - 0 1';
 const RUNS = 24000;
-// This file measures the DRAW, not whether Fate is switched on. This position
-// is far below the stop threshold, so keep Fate on and the two concerns stay
+// This file measures the DRAW, not whether Magic is switched on. This position
+// is far below the stop threshold, so keep Magic on and the two concerns stay
 // separately testable (the stop rule lives in fairness.test.mjs).
 const ALWAYS = { stopsAt: 0 };
 const pieces = new Map([['b1', 0], ['c1', 0]]);

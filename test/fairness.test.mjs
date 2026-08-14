@@ -1,11 +1,11 @@
-// Two promises the game makes about Fate, checked as claims rather than hopes:
+// Two promises the game makes about Magic, checked as claims rather than hopes:
 //   1. Checkmate (and every other ending) is final. No teleport follows it.
 //   2. The draw is uniform. Every eligible piece is equally likely, and for the
-//      chosen piece every eligible empty square is equally likely. Fate is not
+//      chosen piece every eligible empty square is equally likely. Magic is not
 //      nudging material off the board or favouring either colour.
 import { Chess } from '../js/vendor/chess.js';
 import { ChaosMatch } from '../js/core/chaos.js';
-import { runTeleportPhase, validTeleportDests, countPieces, fateIsActive, FATE_STOPS_AT } from '../js/core/teleport.js';
+import { runTeleportPhase, validTeleportDests, countPieces, magicIsActive, MAGIC_STOPS_AT } from '../js/core/teleport.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
 import { assert, ok, summary } from './helpers.mjs';
 
@@ -90,7 +90,7 @@ import { assert, ok, summary } from './helpers.mjs';
   const counts = new Map(dests.map((sq) => [sq, 0]));
   for (let i = 0; i < TRIALS; i++) {
     const board = new Chess(fen);
-    // stopsAt 0 keeps Fate switched on regardless of piece count, isolating
+    // stopsAt 0 keeps Magic switched on regardless of piece count, isolating
     // the destination draw from the stop rule that is tested separately below.
     const [event] = runTeleportPhase(board, makeRng(seedFromString(`dest-${i}`)), 'w', { stopsAt: 0 });
     assert(event.from === 'e2', 'only the pawn can move here');
@@ -105,7 +105,7 @@ import { assert, ok, summary } from './helpers.mjs';
   ok(`every eligible destination is drawn about equally (${dests.length} squares)`);
 }
 
-// Fate must not prefer one colour: over many games each side is teleported the
+// Magic must not prefer one colour: over many games each side is teleported the
 // same number of times, because each side teleports exactly once per own move.
 {
   let white = 0;
@@ -125,11 +125,11 @@ import { assert, ok, summary } from './helpers.mjs';
   }
   const skew = Math.abs(white - black) / (white + black);
   console.log(`  colour balance: white ${white}, black ${black}, skew ${(skew * 100).toFixed(1)}%`);
-  assert(skew < 0.05, `Fate favours a colour: white ${white} vs black ${black}`);
-  ok('Fate teleports both colours equally often');
+  assert(skew < 0.05, `Magic favours a colour: white ${white} vs black ${black}`);
+  ok('Magic teleports both colours equally often');
 }
 
-// Fate must not preferentially strand valuable pieces: piece types are drawn in
+// Magic must not preferentially strand valuable pieces: piece types are drawn in
 // proportion to how many of them are on the board, nothing more.
 {
   const fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1';
@@ -165,7 +165,7 @@ import { assert, ok, summary } from './helpers.mjs';
   ok('piece types are drawn in proportion to how many are eligible, with no value weighting');
 }
 
-/* ---------- 3. WHEN Fate acts is a hard rule, never a dice roll ---------- */
+/* ---------- 3. WHEN Magic acts is a hard rule, never a dice roll ---------- */
 
 // Above the line it must act every single time; at or below it, never. No
 // randomness in the timing at all, or the rule is unpredictable in play.
@@ -177,19 +177,19 @@ import { assert, ok, summary } from './helpers.mjs';
     const board = new Chess(above);
     if (runTeleportPhase(board, makeRng(seedFromString(`above-${i}`)), 'w').length) acted++;
   }
-  assert(acted === TRIALS, `Fate must act every turn above the line, acted ${acted}/${TRIALS}`);
+  assert(acted === TRIALS, `Magic must act every turn above the line, acted ${acted}/${TRIALS}`);
 
   // Exactly one piece over the line: still every single time.
   const edge = '4k3/8/8/8/8/P7/PPPPPPPP/4K3 b - - 0 1'; // 2 kings + 9 pawns = 11
   const edgeBoard = new Chess(edge);
-  assert(countPieces(edgeBoard) === FATE_STOPS_AT + 1, `edge fen has ${countPieces(edgeBoard)} pieces, want ${FATE_STOPS_AT + 1}`);
+  assert(countPieces(edgeBoard) === MAGIC_STOPS_AT + 1, `edge fen has ${countPieces(edgeBoard)} pieces, want ${MAGIC_STOPS_AT + 1}`);
   let edgeActed = 0;
   for (let i = 0; i < TRIALS; i++) {
     const board = new Chess(edge);
     if (runTeleportPhase(board, makeRng(seedFromString(`edge-${i}`)), 'w').length) edgeActed++;
   }
   assert(edgeActed === TRIALS, `one piece above the line must still always act, acted ${edgeActed}/${TRIALS}`);
-  ok(`Fate acts on every single turn while more than ${FATE_STOPS_AT} pieces remain`);
+  ok(`Magic acts on every single turn while more than ${MAGIC_STOPS_AT} pieces remain`);
 }
 
 {
@@ -201,16 +201,16 @@ import { assert, ok, summary } from './helpers.mjs';
     ['deep endgame', '4k3/8/8/8/8/8/8/3QK3 b - - 0 1'],
   ]) {
     const board0 = new Chess(fen);
-    assert(countPieces(board0) <= FATE_STOPS_AT, `${label} has ${countPieces(board0)} pieces, expected <= ${FATE_STOPS_AT}`);
+    assert(countPieces(board0) <= MAGIC_STOPS_AT, `${label} has ${countPieces(board0)} pieces, expected <= ${MAGIC_STOPS_AT}`);
     let acted = 0;
     for (let i = 0; i < TRIALS; i++) {
       const board = new Chess(fen);
       if (runTeleportPhase(board, makeRng(seedFromString(`below-${label}-${i}`)), 'w').length) acted++;
     }
-    assert(acted === 0, `${label}: Fate acted ${acted}/${TRIALS} times below the line`);
-    assert(!fateIsActive(board0), `${label} should report Fate inactive`);
+    assert(acted === 0, `${label}: Magic acted ${acted}/${TRIALS} times below the line`);
+    assert(!magicIsActive(board0), `${label} should report Magic inactive`);
   }
-  ok(`Fate never acts once ${FATE_STOPS_AT} or fewer pieces remain`);
+  ok(`Magic never acts once ${MAGIC_STOPS_AT} or fewer pieces remain`);
 }
 
 // The property that makes it a real rule rather than a mood: once it stops it
@@ -229,7 +229,7 @@ import { assert, ok, summary } from './helpers.mjs';
       const mv = moves[mover.int(moves.length)];
       m.applyMove({ from: mv.from, to: mv.to, promotion: mv.promotion });
       const events = m.teleportIfDue() || [];
-      const f = m.fateState();
+      const f = m.magicState();
       // piece count must never increase, which is what makes the stop final
       assert(f.onBoard <= lastCount, `piece count rose from ${lastCount} to ${f.onBoard} g${g} s${step}`);
       lastCount = f.onBoard;
@@ -239,8 +239,8 @@ import { assert, ok, summary } from './helpers.mjs';
   }
   console.log(`  games that reached the stop: ${stopsSeen}/60, restarts after stopping: ${restarts}`);
   assert(stopsSeen > 0, 'no game reached the stop, so the rule was never exercised');
-  assert(restarts === 0, `Fate restarted after stopping ${restarts} times`);
-  ok('once Fate stops it never acts again for the rest of the game');
+  assert(restarts === 0, `Magic restarted after stopping ${restarts} times`);
+  ok('once Magic stops it never acts again for the rest of the game');
 }
 
 summary('fairness.test.mjs');

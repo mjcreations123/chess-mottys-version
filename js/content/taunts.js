@@ -1,5 +1,5 @@
 // MottyBot's mouth. Smug, deadpan, takes full credit for its own good luck and
-// blames Fate for everything else.
+// blames Motty's magical powers for everything else.
 //
 // Deliberately uses Math.random, NOT the seeded rules RNG. Chatter must never
 // consume draws from the teleport stream or two replays of the same seed would
@@ -40,7 +40,7 @@ const TAUNTS = {
     "Fine. That was good. Do not get used to it.",
     'That stung. I am a program. I am fine.',
     'You found the one move. Now find twenty more.',
-    "That was Fate's doing, not yours.",
+    "That was the magic, not you.",
   ],
   botCheck: [
     'Check. Deal with it.',
@@ -54,17 +54,17 @@ const TAUNTS = {
     'You have inconvenienced me. Briefly.',
     'Bold. Loud. Temporary.',
   ],
-  fateHitYou: [
-    "Fate hates you specifically. I have done nothing.",
+  magicHitYou: [
+    "The magic hates you specifically. I have done nothing.",
     'That is not me. That is the universe agreeing with me.',
     'Your piece lives somewhere else now. Best of luck.',
     'I would never move your pieces. I do not have to.',
     'Beautiful. Absolutely nothing to do with me.',
   ],
-  fateHitMe: [
+  magicHitMe: [
     'That was uncalled for.',
     'I had a plan. I have a new plan. It also beats you.',
-    'Fate is on your side. I am on mine.',
+    'The magic is on your side. I am on mine.',
     'Rigged. Obviously rigged. Against me.',
     "I'll allow it.",
   ],
@@ -86,7 +86,7 @@ const TAUNTS = {
   ],
   botWin: [
     'Good game. I mean that the way winners mean it.',
-    'Checkmate. Fate had no notes.',
+    'Checkmate. The magic had no notes.',
     'Well played. Just not well enough.',
   ],
   playerResign: [
@@ -100,7 +100,7 @@ const TAUNTS = {
   ],
   draw: [
     'A draw. Nobody is happy. That is what a draw is.',
-    'Split point. Fate got bored.',
+    'Split point. The magic got bored.',
   ],
 };
 

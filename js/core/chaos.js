@@ -4,7 +4,7 @@
 //
 // Turn cycle, forever the same:
 //   side to move plays  ->  if the game ended, STOP  ->  otherwise, if more
-//   than FATE_STOPS_AT pieces remain, ONE of that side's non-king pieces
+//   than MAGIC_STOPS_AT pieces remain, ONE of that side's non-king pieces
 //   teleports  ->  other side plays  ->  ...
 //
 // White's very first move has no teleport before it: you move, then you
@@ -14,7 +14,7 @@
 
 import { Chess } from '../vendor/chess.js';
 import { phaseRng } from './rng.js';
-import { runTeleportPhase, fateIsActive, countPieces, FATE_STOPS_AT } from './teleport.js';
+import { runTeleportPhase, magicIsActive, countPieces, MAGIC_STOPS_AT } from './teleport.js';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -35,10 +35,10 @@ export class ChaosMatch {
   fen() { return this.chess.fen(); }
 
   // The house rule's state, readable at any moment so the UI never has to
-  // guess: how many pieces are on the board, the count Fate stops at, and how
+  // guess: how many pieces are on the board, the count Magic stops at, and how
   // many captures are left before it goes quiet for good.
-  fateState() {
-    const stopsAt = this.stopsAt ?? FATE_STOPS_AT;
+  magicState() {
+    const stopsAt = this.stopsAt ?? MAGIC_STOPS_AT;
     const onBoard = countPieces(this.chess);
     return {
       onBoard,

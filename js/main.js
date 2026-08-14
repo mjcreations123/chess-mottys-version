@@ -62,7 +62,7 @@ function requestBotMove(fen, level) {
       id,
       fen,
       level,
-      // Deliberately separate from the Fate seed. The bot receives the board,
+      // Deliberately separate from the Magic seed. The bot receives the board,
       // difficulty and a search tie-break seed, never the upcoming teleport.
       seed: `bot-search-${state.match?.ply || 0}-${fen}`,
     });
@@ -145,16 +145,16 @@ function reactToMove(move, byBot) {
 function reactToTeleport(event) {
   if (!event || state.screen !== 'playing') return;
   const mine = event.piece.color === state.myColor;
-  showTaunt(pickTaunt(mine ? 'fateHitYou' : 'fateHitMe', { chance: 0.45, minGapMs: 11000 }));
+  showTaunt(pickTaunt(mine ? 'magicHitYou' : 'magicHitMe', { chance: 0.45, minGapMs: 11000 }));
 }
 
-function setFate({ phase = 'idle', title, copy, route = '' }) {
-  const strip = $('fate-strip');
+function setMagic({ phase = 'idle', title, copy, route = '' }) {
+  const strip = $('magic-strip');
   strip.dataset.phase = phase;
-  $('fate-title').textContent = title;
-  $('fate-copy').textContent = copy || '';
-  $('fate-route').textContent = route;
-  $('fate-route').hidden = !route;
+  $('magic-title').textContent = title;
+  $('magic-copy').textContent = copy || '';
+  $('magic-route').textContent = route;
+  $('magic-route').hidden = !route;
 }
 
 function renderCaptured() {
@@ -226,14 +226,14 @@ function panelHome() {
   panel.innerHTML = `
     <div class="desk-head">
       <h1>Every move changes twice.</h1>
-      <p>Play real chess against MottyBot. After each move, Fate relocates one piece from that same side.</p>
+      <p>Play real chess against MottyBot. After each move, Motty's magical powers relocate one piece from that same side.</p>
     </div>
     <div class="desk-body">
       ${shared ? `
         <div class="resume-card">
           <strong>A shared chaos is ready</strong>
           <p>Same starting seed, ${escapeHTML(BOTS[shared.level].label.toLowerCase())} difficulty. Your moves still decide what happens next.</p>
-          <button class="btn btn--fate" id="play-shared">Play this challenge</button>
+          <button class="btn btn--magic" id="play-shared">Play this challenge</button>
         </div>` : ''}
       ${active ? `
         <div class="resume-card">
@@ -247,7 +247,7 @@ function panelHome() {
       <div class="rule-sequence" aria-label="How a turn works">
         <div class="rule-step"><span class="rule-step__number">1</span><div><strong>You make a legal move</strong><p>Normal chess rules apply to every move you choose.</p></div></div>
         <div class="rule-step"><span class="rule-step__number">2</span><div><strong>One of your pieces teleports</strong><p>Every eligible piece and every eligible empty destination are random.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Fate stops at ten pieces</strong><p>Down to ten pieces on the board, Fate stops for good and the endgame is plain chess.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Motty's powers stop at ten pieces</strong><p>Down to ten pieces on the board, Motty's magical powers stop for good and the endgame is plain chess.</p></div></div>
       </div>
       <div class="button-stack">
         <button class="btn btn--primary" id="choose-game">
@@ -405,7 +405,7 @@ function startBotGame(level, myColor, { seed = randomSeed() } = {}) {
   state.replay = null;
   configureBoardForMatch();
   panelPlaying();
-  setFate({ title: 'Make a move. Fate moves next.', copy: 'One non-king piece from the moving side will teleport afterward.' });
+  setMagic({ title: "Make a move. Motty's powers move next.", copy: 'One non-king piece from the moving side will teleport afterward.' });
   sound.unlock();
   sound.start();
   persistGame();
@@ -429,7 +429,7 @@ function resumeGame(data) {
     state.result = null;
     configureBoardForMatch();
     panelPlaying();
-    restoreLastFateEvent();
+    restoreLastMagicEvent();
     persistGame();
     resetTaunts();
     clearTaunt();
@@ -444,14 +444,14 @@ function resumeGame(data) {
   }
 }
 
-function restoreLastFateEvent() {
-  if (!state.match.fateState().active) { showFateStopped(); return; }
+function restoreLastMagicEvent() {
+  if (!state.match.magicState().active) { showMagicStopped(); return; }
   const event = [...state.match.log].reverse().find((entry) => entry.kind === 'teleport');
   if (!event) {
-    setFate({ title: 'Make a move. Fate moves next.', copy: fateCountdown() || 'One non-king piece from the moving side will teleport afterward.' });
+    setMagic({ title: "Make a move. Motty's powers move next.", copy: magicCountdown() || 'One non-king piece from the moving side will teleport afterward.' });
     return;
   }
-  showSettledFate(event);
+  showSettledMagic(event);
 }
 
 async function playMoveAnimation(move, { instant = false } = {}) {
@@ -479,8 +479,8 @@ async function playMoveAnimation(move, { instant = false } = {}) {
 async function playTeleport(events) {
   board.setInteractive(null);
   state.animating = true;
-  setFate({ phase: 'choosing', title: 'Fate is choosing', copy: 'One piece. One empty square. No one gets a vote.' });
-  announce('Fate is choosing a piece and destination.');
+  setMagic({ phase: 'choosing', title: "Motty's powers are choosing", copy: 'One piece. One empty square. No one gets a vote.' });
+  announce("Motty's magical powers are choosing a piece and destination.");
   if (!REDUCED_MOTION) await wait(230);
 
   if (!events?.length) {
@@ -489,9 +489,9 @@ async function playTeleport(events) {
     if (phase?.ended) {
       // the game just finished; the result modal speaks for itself
     } else if (phase?.stopped) {
-      showFateStopped();
+      showMagicStopped();
     } else {
-      setFate({ title: 'Fate had no eligible move', copy: 'Only the king remained, so the turn continues without a teleport.' });
+      setMagic({ title: "Motty's powers had no eligible piece", copy: 'Only the king remained, so the turn continues without a teleport.' });
     }
     persistGame();
     return;
@@ -506,42 +506,42 @@ async function playTeleport(events) {
   renderMoveList();
   renderCaptured();
   updateCheckMark();
-  showSettledFate(event);
+  showSettledMagic(event);
   persistGame();
   reactToTeleport(event);
 }
 
 // The rule is only fair if you can see it coming, so every message carries the
-// piece count and how many captures are left before Fate goes quiet for good.
-function fateCountdown() {
-  const f = state.match?.fateState();
+// piece count and how many captures are left before Magic goes quiet for good.
+function magicCountdown() {
+  const f = state.match?.magicState();
   if (!f) return '';
-  if (!f.active) return `${f.onBoard} pieces left. Fate has stopped for good.`;
+  if (!f.active) return `${f.onBoard} pieces left. Motty's powers have stopped for good.`;
   return f.untilStop === 1
-    ? `${f.onBoard} pieces left. One more capture and Fate stops for good.`
-    : `${f.onBoard} pieces left. Fate stops for good at ${f.stopsAt}.`;
+    ? `${f.onBoard} pieces left. One more capture and Motty's powers stop for good.`
+    : `${f.onBoard} pieces left. Motty's powers stop for good at ${f.stopsAt}.`;
 }
 
-function showFateStopped() {
-  setFate({
+function showMagicStopped() {
+  setMagic({
     phase: 'stopped',
-    title: 'Fate has left the board',
-    copy: `Only ${state.match.fateState().onBoard} pieces remain, so nothing teleports for the rest of this game. Plain chess from here.`,
+    title: "Motty's powers have left the board",
+    copy: `Only ${state.match.magicState().onBoard} pieces remain, so nothing teleports for the rest of this game. Plain chess from here.`,
   });
-  announce('Fate has stopped for the rest of the game. Plain chess from here.');
+  announce("Motty's magical powers have stopped for the rest of the game. Plain chess from here.");
 }
 
-function showSettledFate(event) {
+function showSettledMagic(event) {
   const yours = event.piece.color === state.myColor;
   const owner = yours ? 'your' : "MottyBot's";
   const piece = PIECE_NAMES[event.piece.type];
-  setFate({
+  setMagic({
     phase: 'settled',
-    title: `Fate moved ${owner} ${piece}`,
-    copy: fateCountdown(),
+    title: `Motty's powers moved ${owner} ${piece}`,
+    copy: magicCountdown(),
     route: `${event.from} → ${event.to}`,
   });
-  announce(`Fate moved ${owner} ${piece} from ${event.from} to ${event.to}.`);
+  announce(`Motty's magical powers moved ${owner} ${piece} from ${event.from} to ${event.to}.`);
 }
 
 async function botLoop(serial) {
@@ -569,7 +569,7 @@ async function botLoop(serial) {
     setYourTurn(false);
     board.setInteractive(null);
     setThinking(true);
-    setFate({ phase: 'thinking', title: 'MottyBot is thinking', copy: 'It is searching the position Fate left behind.' });
+    setMagic({ phase: 'thinking', title: 'MottyBot is thinking', copy: "It is searching the position Motty's powers left behind." });
     const started = performance.now();
     let candidate;
     try {
@@ -663,7 +663,7 @@ function showResultModal() {
   const note = outcome === 'win'
     ? 'You read the chaos better. MottyBot is allowed to lose, and this time it did.'
     : outcome === 'loss'
-      ? 'The board changed. MottyBot adapted. Try the same Fate again or roll a new one.'
+      ? 'The board changed. MottyBot adapted. Try the same magic again or roll a new one.'
       : 'Nobody escaped the position with a win.';
   showModal(`
     <div class="modal__head">
@@ -680,7 +680,7 @@ function showResultModal() {
       </div>
       <div class="button-stack">
         <button class="btn btn--primary" id="result-new">New chaos</button>
-        <button class="btn btn--secondary" id="result-same">Replay the same Fate</button>
+        <button class="btn btn--secondary" id="result-same">Replay the same magic</button>
         <button class="btn btn--secondary" id="result-review">Review game</button>
         <button class="btn btn--quiet" id="result-share">Share this challenge</button>
       </div>
@@ -731,7 +731,7 @@ function buildReplayFrames() {
         fen: entry.fenAfter,
         kind: 'teleport',
         label: `${capitalize(PIECE_NAMES[entry.piece.type])} ${entry.from} → ${entry.to}`,
-        detail: 'Fate event',
+        detail: "Motty's powers",
         from: entry.from,
         to: entry.to,
         piece: entry.piece,
@@ -757,7 +757,7 @@ function enterReplay() {
       <button id="replay-next" aria-label="Next position">›</button>
       <button id="replay-end" aria-label="Final position">›|</button>
     </div>
-    <div class="desk-body"><p style="color:var(--muted);line-height:1.5;margin:0">Moves and Fate events are separate frames so it is always clear what you chose and what the house rule changed.</p></div>
+    <div class="desk-body"><p style="color:var(--muted);line-height:1.5;margin:0">Moves and magic events are separate frames so it is always clear what you chose and what the house rule changed.</p></div>
     <div class="desk-footer"><button class="btn btn--primary" id="replay-exit">Exit review</button></div>`;
   $('replay-start').onclick = () => setReplayFrame(0);
   $('replay-prev').onclick = () => setReplayFrame(state.replay.index - 1);
@@ -784,9 +784,9 @@ function setReplayFrame(index) {
   $('replay-end').disabled = state.replay.index === max;
   if (frame.kind === 'teleport') {
     const owner = frame.piece.color === state.myColor ? 'your' : "MottyBot's";
-    setFate({ title: `Fate moved ${owner} ${PIECE_NAMES[frame.piece.type]}`, copy: 'Replay frame', route: `${frame.from} → ${frame.to}` });
+    setMagic({ title: `Motty's powers moved ${owner} ${PIECE_NAMES[frame.piece.type]}`, copy: 'Replay frame', route: `${frame.from} → ${frame.to}` });
   } else {
-    setFate({ title: frame.label, copy: frame.detail });
+    setMagic({ title: frame.label, copy: frame.detail });
   }
 }
 
@@ -797,7 +797,7 @@ function exitReplay() {
   board.setLastMove(null);
   board.setTeleportMarks([]);
   updateCheckMark();
-  restoreLastFateEvent();
+  restoreLastMagicEvent();
   panelPostGame();
 }
 
@@ -855,7 +855,7 @@ function showRules() {
         <li><span class="rule-mark">4</span><span><b>A teleport never captures.</b> The destination must be empty. It can be unsafe, and the teleported piece can give check.</span></li>
         <li><span class="rule-mark">5</span><span><b>Pawns stop short of the back rank.</b> They may teleport to the second or seventh rank, then promote with a normal move later.</span></li>
         <li><span class="rule-mark">6</span><span><b>Checkmate ends it immediately.</b> A finished game gets no teleport. Nothing relocates after checkmate, stalemate or a draw.</span></li>
-        <li><span class="rule-mark">7</span><span><b>Fate stops at ten pieces.</b> While more than ten pieces stand on the board, Fate acts after every single move, always. The moment the board is down to ten or fewer, it stops for the rest of the game. It never comes back, because pieces only ever leave the board. The endgame is plain chess.</span></li>
+        <li><span class="rule-mark">7</span><span><b>Motty's magical powers stop at ten pieces.</b> While more than ten pieces stand on the board, they act after every single move, always. The moment the board is down to ten or fewer, they stop for the rest of the game. They never come back, because pieces only ever leave the board. The endgame is plain chess.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);

@@ -1,5 +1,6 @@
-// v4: the teleport schedule changed (Fate eases off in the endgame), so a v3
-// save would replay into a different position than the one it was saved from.
+// v4: the teleport schedule changed (Motty's powers now stop outright once the
+// board is down to ten pieces), so a v3 save would replay into a different
+// position than the one it was saved from.
 const ACTIVE_KEY = 'mv-active-v4';
 const STATS_KEY = 'mv-stats-v3';
 const RULES_KEY = 'mv-rules-seen-v3';

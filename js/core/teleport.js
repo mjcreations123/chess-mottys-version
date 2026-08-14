@@ -47,24 +47,24 @@ export function validTeleportDests(chess, from) {
   return dests;
 }
 
-// WHEN Fate acts is a hard rule, never a dice roll.
+// WHEN Magic acts is a hard rule, never a dice roll.
 //
-// While more than FATE_STOPS_AT pieces stand on the board, Fate acts after
+// While more than MAGIC_STOPS_AT pieces stand on the board, Magic acts after
 // every single move, without exception. The moment the board is down to
-// FATE_STOPS_AT pieces or fewer, Fate stops for the rest of the game.
+// MAGIC_STOPS_AT pieces or fewer, Magic stops for the rest of the game.
 //
 // It can never switch back on: pieces only ever leave the board (a capture
 // removes one, a promotion swaps one for another), so the count never rises.
 // Once it stops, it has stopped, and the endgame is plain chess.
 //
-// This replaced a version where Fate acted with a probability that tapered as
+// This replaced a version where Magic acted with a probability that tapered as
 // material ran out. The maths was even-handed but it read as pure caprice:
 // pieces would scatter, go quiet for a few turns, then scatter again with no
 // visible reason. A rule you cannot predict is not a rule.
 //
 // The count includes both kings, so it is exactly the number of pieces you can
 // see on the board.
-export const FATE_STOPS_AT = 10;
+export const MAGIC_STOPS_AT = 10;
 
 export function countPieces(chess) {
   let pieces = 0;
@@ -74,16 +74,16 @@ export function countPieces(chess) {
   return pieces;
 }
 
-// Is Fate still in play at this position? Depends only on the board.
-export function fateIsActive(chess, stopsAt = FATE_STOPS_AT) {
+// Is Magic still in play at this position? Depends only on the board.
+export function magicIsActive(chess, stopsAt = MAGIC_STOPS_AT) {
   return countPieces(chess) > stopsAt;
 }
 
 // Teleport ONE random non-king piece belonging to `side` (the player who just
 // moved) to a random valid empty square. Returns an array of 0 or 1 events
-// ({ from, to, piece }); empty when nothing of theirs can move or when Fate
+// ({ from, to, piece }); empty when nothing of theirs can move or when Magic
 // passes this turn. Applies the change via surgical FEN edits.
-export function runTeleportPhase(chess, rng, side, { stopsAt = FATE_STOPS_AT, report = null } = {}) {
+export function runTeleportPhase(chess, rng, side, { stopsAt = MAGIC_STOPS_AT, report = null } = {}) {
   const onBoard = countPieces(chess);
   if (report) { report.onBoard = onBoard; report.stopped = false; report.eligible = 0; }
 
