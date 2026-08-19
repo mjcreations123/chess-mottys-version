@@ -342,9 +342,9 @@ function panelHome() {
           </div>
         </div>` : ''}
       <div class="rule-sequence" role="group" aria-label="How a turn works">
-        <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Hide one black hole</strong><p>Choose any empty square. Both secret traps may share a square.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Play legal chess</strong><p>If an opponent lands on your square, that piece falls in. The square immediately reopens.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>One fall, one re-arm</strong><p>Only the owner of the trap that was used chooses again.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Hide one black hole</strong><p>Any empty square. You see yours, MottyBot never does.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Play legal chess</strong><p>Anything of theirs that lands on your square is gone. The square reopens at once.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>One fall, one re-arm</strong><p>Only the player whose trap fired picks a new square.</p></div></div>
       </div>
       <div class="button-stack">
         <button class="btn btn--primary" id="choose-game">
@@ -1298,17 +1298,15 @@ document.addEventListener('keydown', (event) => {
 function showRules() {
   markRulesSeen();
   showModal(`
-    <div class="modal__head"><h2 id="modal-title">Black Hole Chess.</h2><p>Ordinary legal chess with two hidden, one-use traps.</p></div>
+    <div class="modal__head"><h2 id="modal-title">Black Hole Chess.</h2><p>Ordinary chess, plus one hidden trap each.</p></div>
     <div class="modal__body">
       <ol class="rule-list">
-        <li><span class="rule-mark">1</span><span><b>Each player hides one black hole.</b> It must begin on an empty, usable square. You see yours. MottyBot never gets yours. Both traps may secretly share the same square.</span></li>
-        <li><span class="rule-mark">2</span><span><b>A black hole affects only the opponent.</b> Your own pieces may stand on your trap safely. Passing over one does nothing; a piece must land there.</span></li>
-        <li><span class="rule-mark">3</span><span><b>The landing piece disappears.</b> On a capture, the captured piece and the arriving piece can both leave the board. A castling rook can also trigger a trap where it lands.</span></li>
-        <li><span class="rule-mark">4</span><span><b>The square opens again immediately.</b> It is a normal empty square as soon as the arriving piece disappears. Any piece may use it on a later move.</span></li>
-        <li><span class="rule-mark">5</span><span><b>Every trap works once.</b> Only the owner of the trap that swallowed a piece chooses again. The other player never has to choose too. The same square may be used again if it is empty.</span></li>
-        <li><span class="rule-mark">6</span><span><b>You may relocate an active black hole three times per game.</b> Choose a different empty square instead of making a chess move. Relocating ends your turn and is unavailable while your king is in check.</span></li>
-        <li><span class="rule-mark">7</span><span><b>Kings are not protected from black holes.</b> If your king lands on your opponent's trap, it falls in and you lose immediately.</span></li>
-        <li><span class="rule-mark">8</span><span><b>Normal endings still count.</b> Checkmate, stalemate, resignation and the fifty-move rule work normally. Bare kings can keep playing because a black hole can still decide the game.</span></li>
+        <li><span class="rule-mark">1</span><span><b>You each hide one black hole.</b> Any empty square. You see yours, MottyBot never sees it, and you may both pick the same square without knowing.</span></li>
+        <li><span class="rule-mark">2</span><span><b>It only swallows your opponent.</b> Your own pieces sit on it safely, and a piece has to land there. Passing over it does nothing.</span></li>
+        <li><span class="rule-mark">3</span><span><b>Whatever lands there is gone.</b> That includes a rook landing as you castle. If the move was a capture, both pieces leave the board: the one that was taken, and the one that took it.</span></li>
+        <li><span class="rule-mark">4</span><span><b>One trap, one victim.</b> The square turns ordinary the instant it fires, and anything may use it later. Only the player whose trap fired picks a new square; your opponent keeps theirs.</span></li>
+        <li><span class="rule-mark">5</span><span><b>You can move your trap three times a game.</b> It costs your whole turn instead of a chess move, and you cannot do it while your king is in check.</span></li>
+        <li><span class="rule-mark">6</span><span><b>Your king is not safe either.</b> If your king lands on their trap, you lose on the spot. Checkmate, stalemate, resignation and the fifty-move rule all still work, and two bare kings keep playing, because a trap can still end it.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);

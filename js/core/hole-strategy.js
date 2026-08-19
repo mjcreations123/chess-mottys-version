@@ -11,7 +11,13 @@ import { eligibleBlackHoleSquares } from './black-hole.js';
 import { think } from './engine-ai.js';
 import { makeRng, seedFromString } from './rng.js';
 
-const PIECE_VALUE = { p: 100, n: 320, b: 330, r: 500, q: 950, k: 12000 };
+// Catching a king ends the game outright, so it edges out a queen, but only
+// just. It used to sit at 12000, which made a merely POSSIBLE king landing
+// outscore a near-certain queen landing by twelve to one: MottyBot stopped
+// hunting material and started sniping the king, and won games by a blind
+// guess rather than by chess. Traps chase material now; a king is a bonus.
+const KING_TRAP_VALUE = 1100;
+const PIECE_VALUE = { p: 100, n: 320, b: 330, r: 500, q: 950, k: KING_TRAP_VALUE };
 
 export const HOLE_STRATEGY_LEVELS = {
   easy: {

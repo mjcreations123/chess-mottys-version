@@ -69,4 +69,22 @@ const QUICK = { strategy: { replyDepth: 2, replyTimeMs: 45 } };
   ok('trap analysis has no input path for the player\'s hidden square');
 }
 
+
+// Regression: MottyBot hunts material, not the king. The king's trap value sat
+// at 12000, twelve times a queen, so a merely POSSIBLE king landing outscored a
+// near-certain capture. Expert stopped playing chess and started sniping the
+// king, winning games on a blind guess. This exact position used to be trapped
+// on f1, a square only the king can reach.
+{
+  const fen = '5rk1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1';
+  const plan = planStrategicBlackHole(fen, 'b', 'hard', 'king-hunt-guard', {
+    strategy: { replyDepth: 4, replyTimeMs: 220 },
+  });
+  const movers = new Chess(fen).moves({ verbose: true }).filter((move) => move.to === plan.square);
+  assert(movers.length > 0, `nothing can reach the trapped square ${plan.square}`);
+  assert(movers.some((move) => move.piece !== 'k'),
+    `expert trapped ${plan.square}, a square only the king can reach: it is hunting the king again`);
+  ok('expert traps material rather than sniping the king');
+}
+
 summary('hole-strategy.test.mjs');
