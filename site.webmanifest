@@ -1,7 +1,7 @@
 {
   "name": "Chess (Motty's Version)",
   "short_name": "Motty Chess",
-  "description": "Real chess with one random teleport after every move.",
+  "description": "Black Hole Chess with secret one-use traps and disappearing squares.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#101315",

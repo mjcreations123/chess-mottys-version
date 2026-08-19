@@ -1,6 +1,5 @@
-// Deterministic seeded RNG. Replays and same-seed challenges must reproduce
-// the exact teleport sequence, so every rules-engine draw goes through this
-// and nothing else. New game seeds still come from the browser crypto source.
+// Deterministic seeded RNG. Same-seed challenges reproduce MottyBot's secret
+// choices, while new game seeds still come from the browser crypto source.
 
 // xmur3 string hash -> u32 seed
 export function seedFromString(str) {
@@ -37,11 +36,6 @@ export function makeRng(seedU32) {
       return a2;
     },
   };
-}
-
-// One rng per teleport phase: seed#ply
-export function phaseRng(gameSeed, ply) {
-  return makeRng(seedFromString(`${gameSeed}#${ply}`));
 }
 
 // Non-deterministic seed for new games (uses crypto when available)

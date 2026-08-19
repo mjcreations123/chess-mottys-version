@@ -1,9 +1,9 @@
 {
   "name": "chess-mottys-version",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
-  "description": "Chess (Motty's Version). Real chess against a fair bot, with one random non-king teleport after every move.",
+  "description": "Chess (Motty's Version). Secret one-use black holes turn the board into disappearing terrain.",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "test": "node test/run-all.mjs"

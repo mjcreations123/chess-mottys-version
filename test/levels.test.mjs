@@ -1,6 +1,6 @@
 // The three levels must actually be three different opponents. Played as plain
-// chess so the result measures the engine rather than the dice: the teleport
-// rule is random enough to bury a skill gap over a handful of games.
+// chess so the result measures the engine rather than the hidden-square rule,
+// which is swingy enough to bury a skill gap over a handful of games.
 import { Chess } from '../js/vendor/chess.js';
 import { think, LEVELS } from '../js/core/engine-ai.js';
 import { assert, ok, summary } from './helpers.mjs';

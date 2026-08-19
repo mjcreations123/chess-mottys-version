@@ -1,27 +1,36 @@
-// The bot must always produce a legal move, at every level, in chaos
-// positions too. Plus basic competence checks.
+// The bot must always produce a legal move, at every level, on boards with
+// collapsed squares too. Plus basic competence checks.
 import { Chess } from '../js/vendor/chess.js';
-import { ChaosMatch } from '../js/core/chaos.js';
+import { BlackHoleMatch } from '../js/core/black-hole.js';
 import { think } from '../js/core/engine-ai.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
 import { assert, ok, summary } from './helpers.mjs';
 
 const FAST = { timeMs: 120, blunderChance: 0 }; // keep CI quick; search quality still exercised
 
-// 1. bot vs bot chaos games at each level: every move legal, no crashes
+// 1. bot vs bot black-hole games at each level: every move legal, no crashes
 for (const level of ['easy', 'medium', 'hard']) {
   for (let g = 0; g < 3; g++) {
-    const m = new ChaosMatch(`ai-${level}-${g}`);
+    const m = new BlackHoleMatch(`ai-${level}-${g}`);
+    m.selectRandomBlackHole('w');
+    m.selectRandomBlackHole('b');
     for (let step = 0; step < 40; step++) {
       if (m.status().over) break;
-      const mv = think(m.fen(), level, `${level}-${g}-${step}`, FAST);
+      const mv = think(m.fen(), level, `${level}-${g}-${step}`, {
+        ...FAST,
+        holes: m.collapsedSquares(),
+      });
       assert(mv, `bot returned null with legal moves at ${level} g${g} s${step}`);
       // applyMove throws if illegal
       m.applyMove(mv);
-      m.teleportIfDue();
+      m.resolveBlackHoleIfDue();
+      if (m.status().over) break;
+      for (const color of ['w', 'b']) {
+        if (m.selectionRequired(color)) m.selectRandomBlackHole(color);
+      }
     }
   }
-  ok(`${level}: bot vs bot chaos games all legal`);
+  ok(`${level}: bot vs bot black-hole games all legal`);
 }
 
 // 2. mate in one found (medium and hard)

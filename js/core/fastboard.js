@@ -1,7 +1,7 @@
 // A fast 0x88 board used ONLY by the search.
 //
-// The authoritative game state stays in chess.js: it owns the rules, the
-// teleports and the result. But chess.js allocates an object per move and
+// The authoritative game state stays in chess.js: it owns the rules, active
+// black holes and the result. But chess.js allocates an object per move and
 // rebuilds strings as it goes, which capped the search at roughly 1,500
 // positions a second, i.e. three plies. Three plies is a beginner.
 //
@@ -48,12 +48,22 @@ const FEN_PIECES = {
 };
 
 export class FastBoard {
-  constructor(fen) {
+  constructor(fen, holes = []) {
     this.squares = new Int8Array(128);
+    this.holes = new Uint8Array(128);
     this.kings = new Int32Array(2);
     this.undoStack = [];
     this.ply = 0;
     if (fen) this.loadFen(fen);
+    this.setHoles(holes);
+  }
+
+  setHoles(holes = []) {
+    this.holes.fill(0);
+    for (const name of holes) {
+      if (typeof name !== 'string' || !/^[a-h][1-8]$/.test(name)) continue;
+      this.holes[sq0x88(name.charCodeAt(0) - 97, name.charCodeAt(1) - 49)] = 1;
+    }
   }
 
   loadFen(fen) {
@@ -120,6 +130,7 @@ export class FastBoard {
     for (let i = 0; i < 4; i++) {
       const dir = BISHOP_DIRS[i];
       for (let t = sq + dir; onBoard(t); t += dir) {
+        if (this.holes[t]) break;
         const piece = this.squares[t];
         if (piece !== EMPTY) {
           if (piece === bishop || piece === queen) return true;
@@ -132,6 +143,7 @@ export class FastBoard {
     for (let i = 0; i < 4; i++) {
       const dir = ROOK_DIRS[i];
       for (let t = sq + dir; onBoard(t); t += dir) {
+        if (this.holes[t]) break;
         const piece = this.squares[t];
         if (piece !== EMPTY) {
           if (piece === rook || piece === queen) return true;
@@ -165,7 +177,7 @@ export class FastBoard {
 
       if (type === PAWN) {
         const one = sq + forward;
-        if (onBoard(one) && this.squares[one] === EMPTY) {
+        if (onBoard(one) && !this.holes[one] && this.squares[one] === EMPTY) {
           if (!capturesOnly) {
             if (rankOf(one) === promoRank) {
               out.push(encode(sq, one, QUEEN, KIND_NORMAL), encode(sq, one, ROOK, KIND_NORMAL),
@@ -173,7 +185,7 @@ export class FastBoard {
             } else {
               out.push(encode(sq, one, 0, KIND_NORMAL));
               const two = one + forward;
-              if (rankOf(sq) === startRank && this.squares[two] === EMPTY) {
+              if (rankOf(sq) === startRank && !this.holes[two] && this.squares[two] === EMPTY) {
                 out.push(encode(sq, two, 0, KIND_DOUBLE));
               }
             }
@@ -184,6 +196,7 @@ export class FastBoard {
         for (const side of [-1, 1]) {
           const t = sq + forward + side;
           if (!onBoard(t)) continue;
+          if (this.holes[t]) continue;
           const target = this.squares[t];
           if (target !== EMPTY && colorOf(target) === them) {
             if (rankOf(t) === promoRank) {
@@ -204,6 +217,7 @@ export class FastBoard {
         for (let i = 0; i < 8; i++) {
           const t = sq + dirs[i];
           if (!onBoard(t)) continue;
+          if (this.holes[t]) continue;
           const target = this.squares[t];
           if (target === EMPTY) { if (!capturesOnly) out.push(encode(sq, t, 0, KIND_NORMAL)); }
           else if (colorOf(target) === them) out.push(encode(sq, t, 0, KIND_NORMAL));
@@ -216,6 +230,7 @@ export class FastBoard {
       for (let i = 0; i < count; i++) {
         const dir = dirs[i];
         for (let t = sq + dir; onBoard(t); t += dir) {
+          if (this.holes[t]) break;
           const target = this.squares[t];
           if (target === EMPTY) {
             if (!capturesOnly) out.push(encode(sq, t, 0, KIND_NORMAL));
@@ -234,22 +249,22 @@ export class FastBoard {
   #generateCastles(out, us) {
     const them = us ^ 1;
     if (us === WHITE) {
-      if ((this.castling & CASTLE_WK) && this.squares[5] === EMPTY && this.squares[6] === EMPTY
+      if ((this.castling & CASTLE_WK) && !this.holes[5] && !this.holes[6] && this.squares[5] === EMPTY && this.squares[6] === EMPTY
         && !this.isAttacked(4, them) && !this.isAttacked(5, them) && !this.isAttacked(6, them)) {
         out.push(encode(4, 6, 0, KIND_CASTLE));
       }
-      if ((this.castling & CASTLE_WQ) && this.squares[3] === EMPTY && this.squares[2] === EMPTY
-        && this.squares[1] === EMPTY
+      if ((this.castling & CASTLE_WQ) && !this.holes[3] && !this.holes[2] && !this.holes[1]
+        && this.squares[3] === EMPTY && this.squares[2] === EMPTY && this.squares[1] === EMPTY
         && !this.isAttacked(4, them) && !this.isAttacked(3, them) && !this.isAttacked(2, them)) {
         out.push(encode(4, 2, 0, KIND_CASTLE));
       }
     } else {
-      if ((this.castling & CASTLE_BK) && this.squares[117] === EMPTY && this.squares[118] === EMPTY
+      if ((this.castling & CASTLE_BK) && !this.holes[117] && !this.holes[118] && this.squares[117] === EMPTY && this.squares[118] === EMPTY
         && !this.isAttacked(116, them) && !this.isAttacked(117, them) && !this.isAttacked(118, them)) {
         out.push(encode(116, 118, 0, KIND_CASTLE));
       }
-      if ((this.castling & CASTLE_BQ) && this.squares[115] === EMPTY && this.squares[114] === EMPTY
-        && this.squares[113] === EMPTY
+      if ((this.castling & CASTLE_BQ) && !this.holes[115] && !this.holes[114] && !this.holes[113]
+        && this.squares[115] === EMPTY && this.squares[114] === EMPTY && this.squares[113] === EMPTY
         && !this.isAttacked(116, them) && !this.isAttacked(115, them) && !this.isAttacked(114, them)) {
         out.push(encode(116, 114, 0, KIND_CASTLE));
       }

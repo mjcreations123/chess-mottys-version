@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#15191c">
   <title>Chess (Motty's Version)</title>
-  <meta name="description" content="Real chess with one house rule: after every move, one random non-king piece from that same side teleports to a random empty square.">
+  <meta name="description" content="Black Hole Chess against MottyBot. Hide a one-use trap, erase pieces and permanently remove squares from the board.">
   <meta property="og:title" content="Chess (Motty's Version)">
-  <meta property="og:description" content="Make your move. Then Motty's magical powers make one too. Play MottyBot in a fair chess game with a random teleport after every turn.">
+  <meta property="og:description" content="You and MottyBot each hide a one-use black hole. Find theirs with a piece and that piece, plus the square, is gone.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://chess-mottys-version.vercel.app/">
   <meta property="og:image" content="https://chess-mottys-version.vercel.app/og-card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Chess board beside the words Every move changes twice.">
+  <meta property="og:image:alt" content="A chessboard with one square collapsed into a black hole beside the words One square is lying to you.">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="canonical" href="https://chess-mottys-version.vercel.app/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -63,7 +63,7 @@
       <div class="board-frame">
         <div class="board" id="board" aria-describedby="board-help"></div>
       </div>
-      <p id="board-help" class="visually-hidden">Select a piece by tapping it, clicking it, or focusing the board and pressing Enter. Then choose a highlighted destination.</p>
+      <p id="board-help" class="visually-hidden">When choosing a black hole, select a highlighted empty square. During play, select a piece by tapping it, clicking it, or focusing the board and pressing Enter, then choose a highlighted destination.</p>
 
       <div class="playerbar playerbar--bottom" id="row-bottom">
         <div class="avatar avatar--you" id="bottom-avatar" aria-hidden="true">Y</div>
@@ -82,11 +82,13 @@
 
       <div class="magic-strip" id="magic-strip" aria-live="polite">
         <svg class="magic-strip__icon" viewBox="0 0 28 28" aria-hidden="true">
-          <path d="M14 2.5 17 11l8.5 3-8.5 3-3 8.5-3-8.5-8.5-3 8.5-3 3-8.5Z"/>
+          <circle cx="14" cy="14" r="9"/>
+          <circle cx="14" cy="14" r="3.25" fill="currentColor" stroke="none"/>
+          <path d="M4 14c2.5-4.5 5.8-6.7 10-6.7S21.5 9.5 24 14"/>
         </svg>
         <div class="magic-strip__copy">
-          <strong id="magic-title">Every move changes twice</strong>
-          <span id="magic-copy">After a legal move, one piece from that same side teleports.</span>
+          <strong id="magic-title">Choose your secret square</strong>
+          <span id="magic-copy">Your black hole works once. Its square disappears when triggered.</span>
         </div>
         <div class="magic-strip__route" id="magic-route" hidden></div>
       </div>

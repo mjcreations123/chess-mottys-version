@@ -1,9 +1,8 @@
-// v4: the teleport schedule changed (Motty's powers now stop outright once the
-// board is down to ten pieces), so a v3 save would replay into a different
-// position than the one it was saved from.
-const ACTIVE_KEY = 'mv-active-v4';
+// v5 replaces teleport chess with Black Hole Chess. Older active games cannot
+// be resumed because their event streams describe a different board topology.
+const ACTIVE_KEY = 'mv-active-v5';
 const STATS_KEY = 'mv-stats-v3';
-const RULES_KEY = 'mv-rules-seen-v3';
+const RULES_KEY = 'mv-rules-seen-v4';
 
 const read = (key, fallback) => {
   try {
@@ -16,18 +15,18 @@ const read = (key, fallback) => {
 
 export function loadActive() {
   const data = read(ACTIVE_KEY, null);
-  if (!data || data.version !== 4 || typeof data.seed !== 'string' || !Array.isArray(data.ucis)) return null;
+  if (!data || data.version !== 5 || typeof data.seed !== 'string' || !Array.isArray(data.actions)) return null;
   if (!['w', 'b'].includes(data.myColor)) return null;
   if (!['easy', 'medium', 'hard'].includes(data.level)) return null;
   return data;
 }
 
-export function saveActive({ seed, ucis, myColor, level, startedAt = Date.now() }) {
+export function saveActive({ seed, actions, myColor, level, startedAt = Date.now() }) {
   try {
     localStorage.setItem(ACTIVE_KEY, JSON.stringify({
-      version: 4,
+      version: 5,
       seed,
-      ucis,
+      actions,
       myColor,
       level,
       startedAt,

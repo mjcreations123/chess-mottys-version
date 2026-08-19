@@ -1,8 +1,8 @@
-// MottyBot's mouth. Smug, deadpan, takes full credit for its own good luck and
-// blames Motty's magical powers for everything else.
+// MottyBot's mouth. Smug, deadpan, and far too pleased whenever somebody finds
+// one of the hidden squares.
 //
 // Deliberately uses Math.random, NOT the seeded rules RNG. Chatter must never
-// consume draws from the teleport stream or two replays of the same seed would
+// consume draws from the black-hole stream or two replays of the same seed would
 // diverge.
 
 const TAUNTS = {
@@ -40,7 +40,7 @@ const TAUNTS = {
     "Fine. That was good. Do not get used to it.",
     'That stung. I am a program. I am fine.',
     'You found the one move. Now find twenty more.',
-    "That was the magic, not you.",
+    'That was the black hole, not you.',
   ],
   botCheck: [
     'Check. Deal with it.',
@@ -54,19 +54,19 @@ const TAUNTS = {
     'You have inconvenienced me. Briefly.',
     'Bold. Loud. Temporary.',
   ],
-  magicHitYou: [
-    "The magic hates you specifically. I have done nothing.",
-    'That is not me. That is the universe agreeing with me.',
-    'Your piece lives somewhere else now. Best of luck.',
-    'I would never move your pieces. I do not have to.',
-    'Beautiful. Absolutely nothing to do with me.',
+  holeHitYou: [
+    'That square was always a bad idea.',
+    'You found mine. With your piece.',
+    'I was wondering when you would step there.',
+    'The board is smaller now. So is your army.',
+    'One use. Completely worth it.',
   ],
-  magicHitMe: [
-    'That was uncalled for.',
-    'I had a plan. I have a new plan. It also beats you.',
-    'The magic is on your side. I am on mine.',
-    'Rigged. Obviously rigged. Against me.',
-    "I'll allow it.",
+  holeHitMe: [
+    'That square was clearly defective.',
+    'Fine. Pick another one.',
+    'I knew where it was. I was testing it.',
+    'The board ate my piece. Rude.',
+    'You get exactly one of those. Until the next one.',
   ],
   idle: [
     "Take your time. I am not going anywhere.",
@@ -86,8 +86,13 @@ const TAUNTS = {
   ],
   botWin: [
     'Good game. I mean that the way winners mean it.',
-    'Checkmate. The magic had no notes.',
+    'Checkmate. Your black hole had no notes.',
     'Well played. Just not well enough.',
+  ],
+  botHoleWin: [
+    'You found it. That was the whole problem.',
+    'Your king chose the only square that mattered.',
+    'Checkmate would have taken longer.',
   ],
   playerResign: [
     'Resigning. Probably wise.',
@@ -98,9 +103,14 @@ const TAUNTS = {
     'Good game. Genuinely. I am allowed to lose and you made me.',
     'Congratulations. Tell your friends. They will not believe you.',
   ],
+  botHoleLose: [
+    'The board ate my king. I am filing a complaint.',
+    'You did not beat my calculation. You beat the floor.',
+    'Fine. That was an excellent square.',
+  ],
   draw: [
     'A draw. Nobody is happy. That is what a draw is.',
-    'Split point. The magic got bored.',
+    'Split point. Even the holes gave up.',
   ],
 };
 

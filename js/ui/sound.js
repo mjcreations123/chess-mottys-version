@@ -1,4 +1,5 @@
-// Tiny WebAudio synth: wooden clicks for moves, a shimmer for teleports.
+// Tiny WebAudio synth: wooden clicks for moves and a short implosion for a
+// black-hole collapse.
 // No samples, no network, nothing copyrighted.
 
 let ctx = null;
@@ -36,9 +37,9 @@ export const sound = {
     blip({ freq: 190, to: 120, dur: .07, type: 'triangle', gain: .26 });
     blip({ freq: 750, to: 500, dur: .03, type: 'square', gain: .05 });
   },
-  teleport() {
-    blip({ freq: 340, to: 980, dur: .16, type: 'sine', gain: .1 });
-    blip({ freq: 620, to: 1350, dur: .14, type: 'sine', gain: .06, when: .05 });
+  blackHole() {
+    blip({ freq: 360, to: 58, dur: .24, type: 'sawtooth', gain: .08 });
+    blip({ freq: 150, to: 42, dur: .2, type: 'triangle', gain: .16, when: .08 });
   },
   check() { blip({ freq: 620, dur: .09, type: 'square', gain: .07 }); blip({ freq: 830, dur: .1, type: 'square', gain: .06, when: .09 }); },
   start() { blip({ freq: 392, dur: .09, gain: .12 }); blip({ freq: 523, dur: .12, gain: .12, when: .09 }); },

@@ -1,6 +1,6 @@
-// BoardView: renders the 8x8, the pieces, highlights, drag + tap input,
-// promotion picker, and the teleport flight animation. Pure view; the match
-// logic lives in core/chaos.js.
+// BoardView: renders the 8x8, pieces, permanent collapsed squares, the
+// player's visible secret black hole, drag + tap input, promotion, and collapse
+// animation. Pure view; the match logic lives in core/black-hole.js.
 
 import { pieceUse } from './pieces.js';
 
@@ -17,6 +17,9 @@ export class BoardView {
     this.legalProvider = () => [];
     this.selected = null;
     this.drag = null;
+    this.holeSelector = null;
+    this.ownBlackHole = null;
+    this.collapsed = new Set();
     this.busy = false;             // true while an animation runs
     this.focusSq = 'e2';
     this.reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -82,6 +85,7 @@ export class BoardView {
     for (const [sq, elm] of this.pieces) this.#place(elm, sq);
     for (const [, o] of this.overlays) o.remove();
     this.overlays.clear();
+    this.#applySquareStates();
   }
 
   /* ---------- pieces ---------- */
@@ -150,51 +154,37 @@ export class BoardView {
     this.busy = false;
   }
 
-  async animateTeleport({ from, to }) {
+  async animateBlackHole({ square }) {
     this.busy = true;
-    const elm = this.pieces.get(from);
-    if (!elm) { this.busy = false; return; }
-    this.pieces.delete(from);
+    const piece = this.pieces.get(square);
+    const cell = this.el.querySelector(`[data-sq="${square}"]`);
+    const burst = document.createElement('div');
+    burst.className = 'hole-burst';
+    this.#place(burst, square);
+    this.el.appendChild(burst);
+    cell?.classList.add('sq--collapsing');
 
-    if (this.reduceMotion) {
-      this.#place(elm, to);
-      this.pieces.set(to, elm);
-      this.#updateSquareLabels();
-      this.busy = false;
-      return;
+    if (!this.reduceMotion && piece) {
+      const resting = piece.style.transform;
+      const animation = piece.animate([
+        { transform: `${resting} scale(1) rotate(0deg)`, opacity: 1, filter: 'blur(0)' },
+        { transform: `${resting} scale(.64) rotate(8deg)`, opacity: .86, filter: 'blur(.3px)', offset: .58 },
+        { transform: `${resting} scale(.05) rotate(26deg)`, opacity: 0, filter: 'blur(2px)' },
+      ], { duration: 520, easing: 'cubic-bezier(.4,0,.8,.25)', fill: 'forwards' });
+      await Promise.race([animation.finished.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 760))]);
+    } else if (!this.reduceMotion) {
+      await wait(360);
     }
 
-    // ghost left behind (fill forwards + hard timeout so it can never stick)
-    const ghost = elm.cloneNode(true);
-    ghost.style.opacity = '.55';
-    this.el.appendChild(ghost);
-    ghost.animate([{ opacity: .55 }, { opacity: 0 }], { duration: 330, easing: 'ease-out', fill: 'forwards' })
-      .finished.then(() => ghost.remove()).catch(() => {});
-    setTimeout(() => ghost.remove(), 600);
-
-    // flight (never allowed to hang the game loop)
-    const a = this.#pxOf(from);
-    const b = this.#pxOf(to);
-    elm.style.transform = `translate(${b.x}px, ${b.y}px)`; // final resting spot (px == %*size)
-    const anim = elm.animate([
-      { transform: `translate(${a.x}px, ${a.y}px) scale(1)` },
-      { transform: `translate(${(a.x + b.x) / 2}px, ${(a.y + b.y) / 2 - this.el.clientWidth * 0.045}px) scale(1.22)`, offset: .5 },
-      { transform: `translate(${b.x}px, ${b.y}px) scale(1)` },
-    ], { duration: 430, easing: 'cubic-bezier(.25,.8,.3,1)' });
-    await Promise.race([anim.finished.catch(() => {}), new Promise((r) => setTimeout(r, 800))]);
-    this.#place(elm, to);
-    this.pieces.set(to, elm);
-    this.#updateSquareLabels();
-    try { navigator.vibrate?.(22); } catch {}
-
-    // landing ring
-    const ring = document.createElement('div');
-    ring.className = 'land-ring';
-    const { row, col } = this.squareToRC(to);
-    ring.style.transform = `translate(${col * 100}%, ${row * 100}%)`;
-    ring.style.left = '0'; ring.style.top = '0';
-    this.el.appendChild(ring);
-    setTimeout(() => ring.remove(), 520);
+    if (piece) {
+      piece.remove();
+      this.pieces.delete(square);
+    }
+    burst.remove();
+    cell?.classList.remove('sq--collapsing');
+    this.collapsed.add(square);
+    this.#applySquareStates();
+    try { navigator.vibrate?.([18, 28, 24]); } catch {}
     this.busy = false;
   }
 
@@ -220,13 +210,19 @@ export class BoardView {
     this.#clearOverlays('last:');
     if (from) { this.#overlay(`last:${from}`, from, 'overlay--hl'); this.#overlay(`last:${to}`, to, 'overlay--hl'); }
   }
-  setTeleportMarks(pairs) {
-    this.#clearOverlays('tele:');
-    for (const { from, to } of pairs) {
-      this.#overlay(`tele:f${from}`, from, 'overlay--tele');
-      this.#overlay(`tele:t${to}`, to, 'overlay--tele');
+  setBlackHoleState({ own = null, collapsed = [] } = {}) {
+    this.ownBlackHole = own;
+    this.collapsed = new Set(collapsed);
+    this.#applySquareStates();
+  }
+  #applySquareStates() {
+    for (const cell of this.el.querySelectorAll('.sq')) {
+      const square = cell.dataset.sq;
+      cell.classList.toggle('sq--collapsed', this.collapsed.has(square));
+      cell.classList.toggle('sq--own-hole', square === this.ownBlackHole);
+      cell.classList.toggle('sq--hole-choice', !!this.holeSelector?.eligible.has(square));
     }
-    if (pairs.length) setTimeout(() => this.#clearOverlays('tele:'), 1600);
+    this.#updateSquareLabels();
   }
   setCheck(sq) {
     this.#clearOverlays('check:');
@@ -258,6 +254,7 @@ export class BoardView {
 
   /* ---------- input ---------- */
   setInteractive(color, legalProvider) {
+    this.holeSelector = null;
     this.interactiveColor = color;
     this.legalProvider = legalProvider || (() => []);
     this.#select(null);
@@ -265,7 +262,26 @@ export class BoardView {
       elm.classList.toggle('piece--draggable', !!color && elm.dataset.color === color);
     }
     this.el.setAttribute('aria-disabled', color ? 'false' : 'true');
-    this.#updateSquareLabels();
+    this.el.setAttribute('aria-label', 'Chess board. Use arrow keys to move between squares and Enter to select.');
+    this.#applySquareStates();
+  }
+
+  setHoleSelection(squares, onSelect) {
+    this.interactiveColor = null;
+    this.legalProvider = () => [];
+    this.#select(null);
+    this.holeSelector = {
+      eligible: new Set(squares || []),
+      onSelect: onSelect || (() => {}),
+    };
+    for (const [, elm] of this.pieces) elm.classList.remove('piece--draggable');
+    if (!this.holeSelector.eligible.has(this.focusSq)) {
+      this.focusSq = this.holeSelector.eligible.values().next().value || this.focusSq;
+      this.#syncFocus();
+    }
+    this.el.setAttribute('aria-disabled', 'false');
+    this.el.setAttribute('aria-label', 'Choose an empty square for your secret black hole. Use arrow keys and press Enter to place it.');
+    this.#applySquareStates();
   }
 
   #bindPointer() {
@@ -273,6 +289,11 @@ export class BoardView {
     this.el.addEventListener('pointermove', (e) => this.#move(e));
     this.el.addEventListener('pointerup', (e) => this.#up(e));
     this.el.addEventListener('pointercancel', () => this.#cancelDrag());
+    this.el.addEventListener('click', (e) => {
+      if (!this.holeSelector || this.busy) return;
+      const square = this.#squareFromEvent(e);
+      if (square) this.#activateSquare(square);
+    });
   }
   #bindKeyboard() {
     this.el.addEventListener('keydown', (e) => {
@@ -288,7 +309,7 @@ export class BoardView {
         this.#syncFocus();
         return;
       }
-      if ((e.key === 'Enter' || e.key === ' ') && this.interactiveColor && !this.busy) {
+      if ((e.key === 'Enter' || e.key === ' ') && (this.interactiveColor || this.holeSelector) && !this.busy) {
         e.preventDefault();
         this.#activateSquare(this.focusSq);
       }
@@ -304,12 +325,24 @@ export class BoardView {
     const names = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
     for (const sq of this.el.querySelectorAll('.sq')) {
       const piece = this.pieces.get(sq.dataset.sq);
-      const suffix = piece ? `${piece.dataset.color === 'w' ? 'white' : 'black'} ${names[piece.dataset.type]}` : 'empty';
+      const collapsed = this.collapsed.has(sq.dataset.sq);
+      const suffix = collapsed ? 'collapsed square, unavailable'
+        : piece ? `${piece.dataset.color === 'w' ? 'white' : 'black'} ${names[piece.dataset.type]}` : 'empty';
       const selected = this.selected === sq.dataset.sq ? ', selected' : '';
-      sq.setAttribute('aria-label', `${sq.dataset.sq}, ${suffix}${selected}`);
+      const ownHole = this.ownBlackHole === sq.dataset.sq ? ', your active black hole' : '';
+      const choice = this.holeSelector?.eligible.has(sq.dataset.sq) ? ', available for your black hole' : '';
+      sq.setAttribute('aria-label', `${sq.dataset.sq}, ${suffix}${ownHole}${choice}${selected}`);
     }
   }
   #activateSquare(sq) {
+    if (this.holeSelector) {
+      if (!this.holeSelector.eligible.has(sq)) return;
+      const callback = this.holeSelector.onSelect;
+      this.holeSelector = null;
+      this.#applySquareStates();
+      callback(sq);
+      return;
+    }
     const elm = this.pieces.get(sq);
     if (elm && elm.dataset.color === this.interactiveColor) {
       this.#select(sq);
@@ -327,7 +360,7 @@ export class BoardView {
     return this.rcToSquare(row, col);
   }
   #down(e) {
-    if (!this.interactiveColor || this.busy) return;
+    if (this.holeSelector || !this.interactiveColor || this.busy) return;
     const sq = this.#squareFromEvent(e);
     if (!sq) return;
     const elm = this.pieces.get(sq);
