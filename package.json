@@ -1,6 +1,6 @@
 {
   "name": "chess-mottys-version",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "private": true,
   "type": "module",
   "description": "Chess (Motty's Version). Secret one-use black holes remove pieces and may be relocated by spending a turn.",

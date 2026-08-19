@@ -1,7 +1,7 @@
 {
   "name": "Chess (Motty's Version)",
   "short_name": "Motty Chess",
-  "description": "Black Hole Chess with secret one-use traps, reusable squares and tactical relocations.",
+  "description": "Black Hole Chess with overlapping secret traps, reusable squares and tactical relocations.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#101315",

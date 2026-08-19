@@ -309,6 +309,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   padding: 6px 9px;
   border-radius: 5px;
 }
+.turn-state[data-phase="selecting"] { background: var(--magic); color: #21100c; }
+.board-action { display: none; }
 .think-state { color: var(--muted); font-size: 12px; }
 .think-state::after { content: ""; display: inline-block; width: 24px; height: 2px; margin-left: 8px; vertical-align: middle; background: var(--magic); animation: think 1s steps(3,end) infinite; transform-origin: left; }
 @keyframes think { 0% { transform: scaleX(.25); opacity: .45; } 50% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(.25); opacity: .45; } }
@@ -617,9 +619,43 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .top-action span { display: none; }
   .top-action svg { width: 20px; height: 20px; }
   .app-shell { width: 100%; padding: 8px 0 32px; display: block; }
-  .arena { width: min(680px, 100%); margin: 0 auto; }
-  .board { width: 100%; min-width: 0; max-width: none; border-radius: 0; box-shadow: none; }
+  .arena { width: min(680px, 100%); margin: 0 auto; scroll-margin-top: 64px; }
+  .board { width: 100%; min-width: 0; max-width: none; border-radius: 0; box-shadow: none; touch-action: pan-y pinch-zoom; }
   .playerbar { padding: 0 10px; }
+  .board-action {
+    min-height: 48px;
+    margin: 0 10px 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--turn);
+    border-radius: 7px;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    position: sticky;
+    top: 64px;
+    z-index: 14;
+    scroll-margin-top: 64px;
+  }
+  .board-action[hidden] { display: none; }
+  .board-action svg { width: 24px; height: 24px; flex: 0 0 24px; color: var(--turn); fill: none; stroke: currentColor; stroke-width: 1.7; }
+  .board-action div { min-width: 0; }
+  .board-action strong { display: block; font-size: 14px; line-height: 1.2; }
+  .board-action span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.3; }
+  .board-action__cancel {
+    min-width: 60px;
+    min-height: 44px;
+    margin-left: auto;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 780;
+  }
+  .magic-strip[data-phase="selecting"] { display: none; }
   .magic-strip { margin: 8px 10px 0; }
   .matchdesk { width: auto; max-width: 680px; height: auto; min-height: 0; margin: 18px auto 0; border-radius: 9px; }
   .desk-body--moves { max-height: 360px; }

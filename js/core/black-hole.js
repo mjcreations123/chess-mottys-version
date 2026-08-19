@@ -79,17 +79,9 @@ export class BlackHoleMatch {
       throw new Error(`black hole cannot be placed on ${square}`);
     }
 
-    // Secret choices may collide. The latest choice keeps the square and the
-    // displaced hidden trap is immediately reselected by its owner. The player
-    // is never told that their choice happened to collide with MottyBot's.
-    const opponent = otherColor(color);
-    let displaced = null;
-    if (this.blackHoles[opponent] === square) {
-      this.blackHoles[opponent] = null;
-      this.requiredSelections.add(opponent);
-      displaced = opponent;
-    }
-
+    // Secret choices may share a square. Each trap still belongs to its owner
+    // and affects only the opponent, so one landing consumes exactly one trap
+    // and can never force both players to re-arm.
     this.blackHoles[color] = square;
     this.requiredSelections.delete(color);
     const sequence = ++this.selectionCount[color];
@@ -100,7 +92,6 @@ export class BlackHoleMatch {
       square,
       sequence,
       automatic,
-      displaced,
       previousSquare: this.lastTriggered[color],
       fenAfter: this.fen(),
     };
@@ -111,9 +102,7 @@ export class BlackHoleMatch {
   // Deterministic last-resort placement for recovery paths and fuzz tests.
   // The public game uses the difficulty-aware strategist in hole-strategy.js.
   selectFallbackBlackHole(color, excluded = []) {
-    const opponent = otherColor(color);
-    const blocked = [...excluded, this.blackHoles[opponent]].filter(Boolean);
-    const choices = eligibleBlackHoleSquares(this.chess, blocked);
+    const choices = eligibleBlackHoleSquares(this.chess, excluded);
     if (!choices.length) {
       this.requiredSelections.delete(color);
       return null;
@@ -145,14 +134,6 @@ export class BlackHoleMatch {
     // side to move without changing any piece square.
     this.chess.move('--');
 
-    const opponent = otherColor(color);
-    let displaced = null;
-    if (this.blackHoles[opponent] === square) {
-      this.blackHoles[opponent] = null;
-      this.requiredSelections.add(opponent);
-      displaced = opponent;
-    }
-
     this.blackHoles[color] = square;
     const used = ++this.relocationCount[color];
     const event = {
@@ -164,7 +145,6 @@ export class BlackHoleMatch {
       used,
       remaining: this.relocationsRemaining(color),
       automatic,
-      displaced,
       fenBefore,
       fenAfter: this.fen(),
     };
@@ -354,6 +334,14 @@ export function replayMatch(seed, actions) {
   const match = new BlackHoleMatch(seed);
   for (const action of actions) {
     if (action?.kind === 'place') {
+      // Versions 6 and 7 resolved a shared-square choice by deleting the
+      // earlier trap, followed by another placement action for its owner.
+      // Accept that historical action shape while all new games allow both
+      // traps to remain on the same square.
+      if (match.activeBlackHole(action.color)) {
+        match.blackHoles[action.color] = null;
+        match.requiredSelections.add(action.color);
+      }
       match.selectBlackHole(action.color, action.square, { automatic: Boolean(action.automatic) });
     } else if (action?.kind === 'relocate') {
       if (action.from && match.activeBlackHole(action.color) !== action.from) {

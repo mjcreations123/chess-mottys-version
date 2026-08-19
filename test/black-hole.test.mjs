@@ -113,12 +113,12 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
     'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
     'd4', 'c4', 'relocate-collision',
   );
-  const event = match.relocateBlackHole('w', 'c4');
-  assert(event.displaced === 'b', 'relocation did not reconcile a hidden trap collision');
-  assert(match.activeBlackHole('w') === 'c4' && match.selectionRequired('b'), 'relocator did not keep the colliding square');
-  const replacement = match.selectFallbackBlackHole('b', ['c4']);
-  assert(replacement && replacement.square !== 'c4' && match.readyToPlay(), 'displaced opponent trap was not safely replaced');
-  ok('a secret collision during relocation preserves one active trap per side');
+  match.relocateBlackHole('w', 'c4');
+  assert(match.activeBlackHole('w') === 'c4' && match.activeBlackHole('b') === 'c4',
+    'relocation did not preserve both hidden traps on the shared square');
+  assert(match.readyToPlay() && !match.selectionRequired('w') && !match.selectionRequired('b'),
+    'sharing a square forced an unrelated replacement');
+  ok('relocating onto the opponent\'s hidden square does not force a second selection');
 }
 
 {
@@ -154,12 +154,55 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
 {
   const match = new BlackHoleMatch('collision');
   match.selectBlackHole('b', 'd4', { automatic: true });
-  const placement = match.selectBlackHole('w', 'd4');
-  assert(placement.displaced === 'b', 'secret-square collision was not reconciled');
-  assert(match.activeBlackHole('w') === 'd4' && match.selectionRequired('b'), 'latest secret did not keep the colliding square');
-  const replacement = match.selectFallbackBlackHole('b', ['d4']);
-  assert(replacement.square !== 'd4', 'displaced bot selected the player\'s active square again');
-  ok('colliding secret choices stay hidden and preserve one active trap each');
+  match.selectBlackHole('w', 'd4');
+  assert(match.activeBlackHole('w') === 'd4' && match.activeBlackHole('b') === 'd4',
+    'same-square secrets did not remain active together');
+  assert(match.readyToPlay() && !match.selectionRequired('w') && !match.selectionRequired('b'),
+    'same-square secrets forced an extra selection');
+  ok('colliding secret choices remain active without revealing or replacing either trap');
+}
+
+{
+  const match = at('4k3/8/8/8/4P3/8/8/4K3 w - - 0 1', 'd5', 'd5', 'single-rearm');
+  match.chess.put({ type: 'p', color: 'b' }, 'd5');
+  match.applyMove({ from: 'e4', to: 'd5' });
+  const [event] = match.resolveBlackHoleIfDue();
+  assert(event.owner === 'b' && event.victimColor === 'w', 'the opponent-owned trap did not catch the moving piece');
+  assert(match.activeBlackHole('w') === 'd5' && match.activeBlackHole('b') === null,
+    'the safe owner trap was consumed with the triggered trap');
+  assert(!match.selectionRequired('w') && match.selectionRequired('b'),
+    'both players were asked to re-arm after one piece fell');
+  match.selectBlackHole('b', 'd5', { automatic: true });
+  assert(match.readyToPlay() && match.activeBlackHole('w') === 'd5' && match.activeBlackHole('b') === 'd5',
+    'the single required re-arm did not restore play');
+  ok('one fall consumes one opponent trap and requires exactly one owner to re-arm');
+}
+
+{
+  const match = at('4k3/8/8/8/3p4/8/8/4K3 b - - 0 1', 'e3', 'e3', 'single-rearm-reverse');
+  match.chess.put({ type: 'p', color: 'w' }, 'e3');
+  match.applyMove({ from: 'd4', to: 'e3' });
+  const [event] = match.resolveBlackHoleIfDue();
+  assert(event.owner === 'w' && event.victimColor === 'b', 'the player-owned trap did not catch MottyBot');
+  assert(match.activeBlackHole('b') === 'e3' && match.activeBlackHole('w') === null,
+    'MottyBot\'s safe trap was consumed with the player trap');
+  assert(match.selectionRequired('w') && !match.selectionRequired('b'),
+    'MottyBot was asked to re-arm when its own piece fell');
+  match.selectBlackHole('w', 'e3');
+  assert(match.readyToPlay() && match.activeBlackHole('w') === 'e3' && match.activeBlackHole('b') === 'e3',
+    'the player\'s single re-arm did not restore play');
+  ok('the one-owner re-arm rule is symmetric when MottyBot falls');
+}
+
+{
+  const restored = replayMatch('legacy-collision', [
+    { kind: 'place', color: 'b', square: 'd4', automatic: true },
+    { kind: 'place', color: 'w', square: 'd4', automatic: false },
+    { kind: 'place', color: 'b', square: 'e4', automatic: true },
+  ]);
+  assert(restored.activeBlackHole('w') === 'd4' && restored.activeBlackHole('b') === 'e4' && restored.readyToPlay(),
+    'legacy exclusive-collision actions did not migrate to their final trap positions');
+  ok('legacy collision saves replay under the shared-square rule');
 }
 
 {

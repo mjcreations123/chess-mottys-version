@@ -49,17 +49,60 @@ const board = new BoardView($('board'), { onUserMove: handleUserMove });
 /* Worker */
 let worker = null;
 let workerSeq = 0;
+const WORKER_TIMEOUT_MS = 15000;
 function requestWorker(payload) {
   if (!worker) worker = new Worker('/js/ai.worker.js', { type: 'module' });
+  const activeWorker = worker;
   return new Promise((resolve, reject) => {
     const id = ++workerSeq;
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      activeWorker.removeEventListener('message', onMessage);
+      activeWorker.removeEventListener('error', onError);
+      activeWorker.removeEventListener('messageerror', onMessageError);
+    };
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
     const onMessage = (event) => {
       if (event.data.id !== id) return;
-      worker.removeEventListener('message', onMessage);
-      event.data.error ? reject(new Error(event.data.error)) : resolve(event.data);
+      event.data.error
+        ? finish(reject, new Error(event.data.error))
+        : finish(resolve, event.data);
     };
-    worker.addEventListener('message', onMessage);
-    worker.postMessage({ id, ...payload });
+    const onError = (event) => {
+      if (worker === activeWorker) {
+        activeWorker.terminate();
+        worker = null;
+      }
+      finish(reject, new Error(event.message || 'MottyBot worker failed'));
+    };
+    const onMessageError = () => {
+      if (worker === activeWorker) {
+        activeWorker.terminate();
+        worker = null;
+      }
+      finish(reject, new Error('MottyBot worker returned an unreadable response'));
+    };
+    const timeout = setTimeout(() => {
+      if (worker === activeWorker) {
+        activeWorker.terminate();
+        worker = null;
+      }
+      finish(reject, new Error('MottyBot worker timed out'));
+    }, WORKER_TIMEOUT_MS);
+    activeWorker.addEventListener('message', onMessage);
+    activeWorker.addEventListener('error', onError);
+    activeWorker.addEventListener('messageerror', onMessageError);
+    try {
+      activeWorker.postMessage({ id, ...payload });
+    } catch (error) {
+      finish(reject, error);
+    }
   });
 }
 
@@ -95,6 +138,11 @@ function escapeHTML(value) {
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function positionMap(fen = state.match?.fen() || START_FEN) { return parseFen(fen).board; }
 function announce(text) { $('announcer').textContent = ''; requestAnimationFrame(() => { $('announcer').textContent = text; }); }
+function setSkipTarget(target, label) {
+  const link = $('skip-link');
+  link.href = `#${target}`;
+  link.textContent = label;
+}
 
 function kingSquare(color, fen = state.match?.fen()) {
   if (!fen) return null;
@@ -120,7 +168,34 @@ function updateCheckMark(fen = state.match?.fen()) {
 }
 
 function setThinking(on) { $('top-thinking').hidden = !on; }
-function setYourTurn(on) { $('turn-tag').hidden = !on; }
+function setPlayerAction(label = null, { phase = 'turn', title = '', copy = '', onCancel = null } = {}) {
+  const tag = $('turn-tag');
+  tag.hidden = !label;
+  tag.textContent = label || 'Your move';
+  tag.dataset.phase = phase;
+
+  const prompt = $('board-action');
+  prompt.hidden = !title;
+  prompt.dataset.phase = phase;
+  $('board-action-title').textContent = title;
+  $('board-action-copy').textContent = copy;
+  const cancel = $('board-action-cancel');
+  cancel.hidden = typeof onCancel !== 'function';
+  cancel.onclick = typeof onCancel === 'function' ? onCancel : null;
+}
+function setYourTurn(on) { setPlayerAction(on ? 'Your move' : null); }
+function focusBoard({ keepActionVisible = false } = {}) {
+  requestAnimationFrame(() => {
+    board.el.focus({ preventScroll: true });
+    const prompt = $('board-action');
+    const visibleTarget = keepActionVisible && !prompt.hidden ? prompt : board.el;
+    if (matchMedia('(max-width: 1080px)').matches) {
+      document.querySelector('.arena').scrollIntoView({ block: 'start', inline: 'nearest' });
+    } else {
+      visibleTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  });
+}
 
 /* MottyBot's mouth */
 let tauntTimer = null;
@@ -235,6 +310,7 @@ function challengeURL() {
 /* Match desk */
 function panelHome() {
   state.screen = 'home';
+  setSkipTarget('panel', 'Skip to game controls');
   panel.className = 'matchdesk matchdesk--home';
   board.setInteractive(null);
   setThinking(false);
@@ -266,9 +342,9 @@ function panelHome() {
           </div>
         </div>` : ''}
       <div class="rule-sequence" role="group" aria-label="How a turn works">
-        <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Hide one black hole</strong><p>Choose any empty square. You see yours. MottyBot never gets yours.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Hide one black hole</strong><p>Choose any empty square. Both secret traps may share a square.</p></div></div>
         <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Play legal chess</strong><p>If an opponent lands on your square, that piece falls in. The square immediately reopens.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Re-arm or relocate</strong><p>Replace a used trap for free, or spend up to three turns moving an active one.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>One fall, one re-arm</strong><p>Only the owner of the trap that was used chooses again.</p></div></div>
       </div>
       <div class="button-stack">
         <button class="btn btn--primary" id="choose-game">
@@ -297,8 +373,12 @@ function panelHome() {
 
 function panelSetup() {
   state.screen = 'setup';
+  setSkipTarget('panel', 'Skip to game controls');
   panel.className = 'matchdesk matchdesk--setup';
   board.setInteractive(null);
+  setThinking(false);
+  setYourTurn(false);
+  clearTaunt();
   let level = 'medium';
   let color = 'w';
   panel.innerHTML = `
@@ -343,6 +423,7 @@ function panelSetup() {
 }
 
 function panelPlaying() {
+  setSkipTarget('board', 'Skip to the board');
   panel.className = 'matchdesk';
   const ownHole = state.match?.activeBlackHole(state.myColor);
   panel.innerHTML = `
@@ -367,6 +448,7 @@ function panelPlaying() {
 }
 
 function panelPostGame() {
+  setSkipTarget('panel', 'Skip to game review');
   panel.className = 'matchdesk';
   panel.innerHTML = `
     <div class="desk-head">
@@ -455,10 +537,11 @@ function updateRelocateControl() {
 }
 
 function panelHolePlacement({ initial = false, previousSquare = null } = {}) {
+  setSkipTarget('board', 'Skip to black-hole selection');
   panel.className = 'matchdesk matchdesk--placing';
   panel.innerHTML = `
     <div class="desk-head">
-      <h2>${initial ? 'Hide your black hole.' : 'Choose its replacement.'}</h2>
+      <h2>${initial ? 'Hide your black hole.' : 'Replace your black hole.'}</h2>
       <p>Select any empty square directly on the board. MottyBot will not be shown your choice.</p>
     </div>
     <div class="desk-body">
@@ -470,6 +553,7 @@ function panelHolePlacement({ initial = false, previousSquare = null } = {}) {
 }
 
 function panelRelocation(currentSquare, remaining) {
+  setSkipTarget('board', 'Skip to black-hole relocation');
   panel.className = 'matchdesk matchdesk--placing';
   panel.innerHTML = `
     <div class="desk-head">
@@ -513,7 +597,6 @@ function beginPlayerRelocation() {
   const remaining = match.relocationsRemaining(state.myColor);
   const choices = match.eligibleRelocationSquares(state.myColor);
   state.screen = 'relocating';
-  setYourTurn(false);
   clearTaunt();
   panelRelocation(currentSquare, remaining);
   board.setBlackHoleState({ own: currentSquare, spent: null });
@@ -526,8 +609,15 @@ function beginPlayerRelocation() {
     showArmedHoleStatus();
     botLoop(serial);
     announce('Black-hole relocation canceled. Your turn continues.');
-    requestAnimationFrame(() => board.el.focus());
+    focusBoard();
   };
+
+  setPlayerAction('Choose new square', {
+    phase: 'selecting',
+    title: 'Move your black hole',
+    copy: 'Tap a marked empty square. This uses your turn.',
+    onCancel: cancel,
+  });
 
   const handleSelection = async (square) => {
     if (state.serial !== serial || state.match !== match || state.over || state.screen !== 'relocating') return;
@@ -564,10 +654,6 @@ function beginPlayerRelocation() {
       endGame();
       return;
     }
-    const botColor = opposingColor(state.myColor);
-    if (relocation.displaced === botColor && match.selectionRequired(botColor)) {
-      await chooseBotBlackHole();
-    }
     if (state.serial !== serial || state.match !== match || state.over) return;
     persistGame();
     botLoop(serial);
@@ -586,7 +672,7 @@ function beginPlayerRelocation() {
     route: `${remaining} left`,
   });
   announce(`Choose a different empty square for your black hole. You have ${remaining} changes left. Canceling keeps your turn.`);
-  requestAnimationFrame(() => board.el.focus());
+  focusBoard({ keepActionVisible: true });
 }
 
 async function chooseBotBlackHole() {
@@ -613,17 +699,16 @@ async function chooseBotBlackHole() {
   }
   if (state.serial !== serial || state.match !== match || state.over) return null;
 
-  const playerHole = match.activeBlackHole(state.myColor);
   const eligible = new Set(match.eligibleBlackHoles(botColor));
   const ranked = strategy?.candidates?.map((item) => item.square) || [];
-  const square = ranked.find((candidate) => candidate !== playerHole && eligible.has(candidate));
+  const square = ranked.find((candidate) => eligible.has(candidate));
   let placement = null;
   try {
     placement = square
       ? match.selectBlackHole(botColor, square, { automatic: true })
-      : match.selectFallbackBlackHole(botColor, [playerHole]);
+      : match.selectFallbackBlackHole(botColor);
   } catch {
-    placement = match.selectFallbackBlackHole(botColor, [playerHole]);
+    placement = match.selectFallbackBlackHole(botColor);
   }
 
   state.plannedBotMove = strategy?.plannedMove && match.turn() === botColor
@@ -649,25 +734,26 @@ function choosePlayerBlackHole({ initial = false } = {}) {
     }
 
     state.screen = 'placing';
-    setYourTurn(false);
     setThinking(false);
     clearTaunt();
     const previousSquare = initial ? null : match.lastTriggeredSquare(state.myColor);
+    setPlayerAction(initial ? 'Choose black hole' : 'Choose new black hole', {
+      phase: 'selecting',
+      title: initial ? 'Choose your black hole' : 'Choose a new black hole',
+      copy: previousSquare
+        ? `Tap any marked empty square. ${previousSquare} is available again.`
+        : 'Tap any marked empty square on the board.',
+    });
     panelHolePlacement({ initial, previousSquare });
     board.setBlackHoleState({ own: null, spent: previousSquare });
     const handleSelection = async (square) => {
       if (state.serial !== serial || state.match !== match || state.over) return;
-      let placement;
       try {
-        placement = match.selectBlackHole(state.myColor, square);
+        match.selectBlackHole(state.myColor, square);
       } catch {
         sound.illegal();
         board.setHoleSelection(match.eligibleBlackHoles(state.myColor), handleSelection, { previousSquare });
         return;
-      }
-      const botColor = opposingColor(state.myColor);
-      if (placement.displaced === botColor && match.selectionRequired(botColor)) {
-        await chooseBotBlackHole();
       }
       if (state.serial !== serial || state.match !== match || state.over) return;
       state.screen = 'playing';
@@ -689,13 +775,14 @@ function choosePlayerBlackHole({ initial = false } = {}) {
     announce(initial
       ? 'Choose an empty square for your secret black hole.'
       : `Your black hole was used. ${previousSquare} is open again and may be selected again.`);
-    requestAnimationFrame(() => board.el.focus());
+    focusBoard({ keepActionVisible: true });
   });
 }
 
 async function startBotGame(level, myColor, { seed = randomSeed() } = {}) {
   const serial = ++state.serial;
   state.match = new BlackHoleMatch(seed);
+  const match = state.match;
   state.myColor = myColor;
   state.bot = BOTS[level] || BOTS.medium;
   state.over = false;
@@ -711,9 +798,10 @@ async function startBotGame(level, myColor, { seed = randomSeed() } = {}) {
   resetTaunts();
   clearTaunt();
   await choosePlayerBlackHole({ initial: true });
-  if (state.serial !== serial || !state.match || state.over) return;
+  if (state.serial !== serial || state.match !== match || state.over) return;
   const botColor = opposingColor(state.myColor);
   if (state.match.selectionRequired(botColor)) await chooseBotBlackHole();
+  if (state.serial !== serial || state.match !== match || state.over) return;
   state.screen = 'playing';
   syncBoard();
   panelPlaying();
@@ -727,6 +815,7 @@ async function resumeGame(data) {
   try {
     const serial = ++state.serial;
     state.match = replayMatch(data.seed, data.actions);
+    const match = state.match;
     state.match.startedAt = data.startedAt || Date.now();
     state.myColor = data.myColor;
     state.bot = BOTS[data.level] || BOTS.medium;
@@ -742,9 +831,10 @@ async function resumeGame(data) {
     if (state.match.selectionRequired(state.myColor)) {
       await choosePlayerBlackHole({ initial: state.match.ply === 0 });
     }
-    if (state.serial !== serial || !state.match || state.over) return;
+    if (state.serial !== serial || state.match !== match || state.over) return;
     const botColor = opposingColor(state.myColor);
     if (state.match.selectionRequired(botColor)) await chooseBotBlackHole();
+    if (state.serial !== serial || state.match !== match || state.over) return;
     state.screen = 'playing';
     syncBoard();
     panelPlaying();
@@ -762,6 +852,8 @@ async function resumeGame(data) {
 }
 
 async function playMoveAnimation(move, { instant = false } = {}) {
+  const match = state.match;
+  const serial = state.serial;
   state.animating = true;
   const rookHop = move.flags.includes('k')
     ? { rookFrom: move.color === 'w' ? 'h1' : 'h8', rookTo: move.color === 'w' ? 'f1' : 'f8' }
@@ -775,14 +867,19 @@ async function playMoveAnimation(move, { instant = false } = {}) {
   } else {
     await board.animateMove({ from: move.from, to: move.to, ...rookHop, epSquare, promotion: move.promotion, color: move.color });
   }
-  board.setLastMove(move.from, move.to);
+  if (state.match !== match || state.serial !== serial) return false;
   state.animating = false;
+  if (state.over) return false;
+  board.setLastMove(move.from, move.to);
   syncBoard();
   renderCaptured();
   renderMoveList();
+  return true;
 }
 
 async function playBlackHole(events) {
+  const match = state.match;
+  const serial = state.serial;
   board.setInteractive(null);
   if (!events?.length) {
     updateCheckMark();
@@ -802,15 +899,20 @@ async function playBlackHole(events) {
   });
   announce(`${owner} black hole opened on ${event.square}. ${capitalize(victim)} ${PIECE_NAMES[event.piece.type]} was removed. The square is open again.`);
   sound.blackHole();
-  await board.animateBlackHole(event);
+  await board.animateBlackHole({
+    ...event,
+    consumeOwnHole: event.owner === state.myColor,
+  });
+  if (state.match !== match || state.serial !== serial) return;
   state.animating = false;
+  if (state.over) return;
   syncBoard();
   renderMoveList();
   renderCaptured();
   updateCheckMark();
   reactToBlackHole(event);
 
-  if (state.match.status().over) {
+  if (match.status().over) {
     persistGame();
     return;
   }
@@ -819,16 +921,18 @@ async function playBlackHole(events) {
     await choosePlayerBlackHole();
   } else {
     const replacement = await chooseBotBlackHole();
+    if (state.match !== match || state.serial !== serial || state.over) return;
     syncBoard();
     setHoleStatus({
       phase: 'armed',
       title: replacement ? 'MottyBot hid a new black hole' : 'MottyBot has no empty square left',
       copy: replacement
-        ? `Its new trap is secret. Your black hole remains armed on ${state.match.activeBlackHole(state.myColor)}.`
-        : `Your black hole remains armed on ${state.match.activeBlackHole(state.myColor)}.`,
-      route: `${state.match.blackHolesTriggered()} triggered`,
+        ? `Its new trap is secret. Your black hole remains armed on ${match.activeBlackHole(state.myColor)}.`
+        : `Your black hole remains armed on ${match.activeBlackHole(state.myColor)}.`,
+      route: `${match.blackHolesTriggered()} triggered`,
     });
   }
+  if (state.match !== match || state.serial !== serial || state.over) return;
   persistGame();
 }
 
@@ -877,7 +981,7 @@ async function botLoop(serial) {
     const move = match.applyMove(candidate);
     persistGame();
     announce(`MottyBot moved from ${move.from} to ${move.to}.`);
-    await playMoveAnimation(move);
+    if (!await playMoveAnimation(move)) return;
     reactToMove(move, true);
   }
 }
@@ -898,7 +1002,7 @@ async function handleUserMove({ from, to, promotion, instant }) {
   updateRelocateControl();
   board.setInteractive(null);
   persistGame();
-  await playMoveAnimation(move, { instant });
+  if (!await playMoveAnimation(move, { instant })) return;
   reactToMove(move, false);
   botLoop(state.serial);
 }
@@ -926,6 +1030,7 @@ function endGame() {
   const status = state.match.status();
   if (!status.over) return;
   state.over = true;
+  state.animating = false;
   state.screen = 'postgame';
   board.setInteractive(null);
   setThinking(false);
@@ -1026,7 +1131,6 @@ function buildReplayFrames() {
   const active = { w: null, b: null };
   for (const entry of state.match.log) {
     if (entry.kind === 'placement') {
-      if (entry.displaced) active[entry.displaced] = null;
       active[entry.color] = entry.square;
       if (entry.color === state.myColor) {
         frames.push({
@@ -1054,7 +1158,6 @@ function buildReplayFrames() {
         spent: null,
       });
     } else if (entry.kind === 'relocation') {
-      if (entry.displaced) active[entry.displaced] = null;
       active[entry.color] = entry.to;
       if (entry.color === state.myColor) {
         frames.push({
@@ -1087,6 +1190,7 @@ function buildReplayFrames() {
 
 function enterReplay() {
   if (!state.match) return;
+  setSkipTarget('panel', 'Skip to replay controls');
   clearTaunt();
   state.screen = 'replay';
   panel.className = 'matchdesk';
@@ -1197,11 +1301,11 @@ function showRules() {
     <div class="modal__head"><h2 id="modal-title">Black Hole Chess.</h2><p>Ordinary legal chess with two hidden, one-use traps.</p></div>
     <div class="modal__body">
       <ol class="rule-list">
-        <li><span class="rule-mark">1</span><span><b>Each player hides one black hole.</b> It must begin on an empty, usable square. You see yours. MottyBot never gets yours.</span></li>
+        <li><span class="rule-mark">1</span><span><b>Each player hides one black hole.</b> It must begin on an empty, usable square. You see yours. MottyBot never gets yours. Both traps may secretly share the same square.</span></li>
         <li><span class="rule-mark">2</span><span><b>A black hole affects only the opponent.</b> Your own pieces may stand on your trap safely. Passing over one does nothing; a piece must land there.</span></li>
         <li><span class="rule-mark">3</span><span><b>The landing piece disappears.</b> On a capture, the captured piece and the arriving piece can both leave the board. A castling rook can also trigger a trap where it lands.</span></li>
         <li><span class="rule-mark">4</span><span><b>The square opens again immediately.</b> It is a normal empty square as soon as the arriving piece disappears. Any piece may use it on a later move.</span></li>
-        <li><span class="rule-mark">5</span><span><b>Every trap works once.</b> Its owner chooses another empty square before the next move. The same square may be chosen again if it is empty.</span></li>
+        <li><span class="rule-mark">5</span><span><b>Every trap works once.</b> Only the owner of the trap that swallowed a piece chooses again. The other player never has to choose too. The same square may be used again if it is empty.</span></li>
         <li><span class="rule-mark">6</span><span><b>You may relocate an active black hole three times per game.</b> Choose a different empty square instead of making a chess move. Relocating ends your turn and is unavailable while your king is in check.</span></li>
         <li><span class="rule-mark">7</span><span><b>Kings are not protected from black holes.</b> If your king lands on your opponent's trap, it falls in and you lose immediately.</span></li>
         <li><span class="rule-mark">8</span><span><b>Normal endings still count.</b> Checkmate, stalemate, resignation and the fifty-move rule work normally. Bare kings can keep playing because a black hole can still decide the game.</span></li>
@@ -1237,12 +1341,24 @@ function requestNewGame() {
     hideModal();
     state.serial++;
     state.over = true;
+    state.animating = false;
     state.match = null;
     panelSetup();
   };
 }
 
 /* Global controls and boot */
+$('skip-link').addEventListener('click', (event) => {
+  const target = document.querySelector($('skip-link').getAttribute('href'));
+  if (!target) return;
+  event.preventDefault();
+  if (target === board.el) {
+    focusBoard({ keepActionVisible: !$('board-action').hidden });
+    return;
+  }
+  target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+});
 $('nav-new').onclick = requestNewGame;
 $('nav-rules').onclick = showRules;
 $('nav-sound').onclick = () => {

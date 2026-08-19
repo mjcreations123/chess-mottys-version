@@ -9,6 +9,7 @@ let triggers = 0;
 let repeatedSquares = 0;
 let kingFalls = 0;
 let relocations = 0;
+let sharedSquares = 0;
 
 for (let game = 0; game < GAMES; game++) {
   const match = new BlackHoleMatch(`fuzz-${game}`);
@@ -18,9 +19,7 @@ for (let game = 0; game < GAMES; game++) {
 
   for (let step = 0; step < MAX_PLIES && !match.status().over; step++) {
     const color = match.turn();
-    const opponent = color === 'w' ? 'b' : 'w';
-    const relocationChoices = match.eligibleRelocationSquares(color)
-      .filter((square) => square !== match.activeBlackHole(opponent));
+    const relocationChoices = match.eligibleRelocationSquares(color);
     let events = [];
     if (relocationChoices.length && mover.next() < 0.055 && match.canRelocateBlackHole(color)) {
       match.relocateBlackHole(color, relocationChoices[mover.int(relocationChoices.length)], { automatic: true });
@@ -50,18 +49,17 @@ for (let game = 0; game < GAMES; game++) {
     for (const color of ['w', 'b']) {
       if (!match.selectionRequired(color)) continue;
       const previous = match.lastTriggeredSquare(color);
-      const opponentHole = match.activeBlackHole(color === 'w' ? 'b' : 'w');
-      if (previous && previous !== opponentHole && match.eligibleBlackHoles(color).includes(previous) && mover.next() < 0.5) {
+      if (previous && match.eligibleBlackHoles(color).includes(previous) && mover.next() < 0.5) {
         match.selectBlackHole(color, previous, { automatic: true });
         repeatedSquares++;
       } else {
-        match.selectFallbackBlackHole(color, [opponentHole]);
+        match.selectFallbackBlackHole(color);
       }
     }
     assert(match.readyToPlay(), `replacement selection stalled game ${game}:${step}`);
     const white = match.activeBlackHole('w');
     const black = match.activeBlackHole('b');
-    if (white && black) assert(white !== black, `active black holes overlap on ${white}`);
+    if (white && white === black) sharedSquares++;
     if (white && match.chess.get(white)) {
       assert(match.chess.get(white).color === 'w', `opponent survived on white black hole ${white}`);
     }
@@ -87,9 +85,10 @@ for (let game = 0; game < GAMES; game++) {
     `replay result drift in game ${game}`);
 }
 
-console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${relocations} relocations, ${triggers} triggers, ${repeatedSquares} same-square re-arms, ${kingFalls} king falls`);
+console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${relocations} relocations, ${triggers} triggers, ${repeatedSquares} same-square re-arms, ${sharedSquares} shared-trap states, ${kingFalls} king falls`);
 assert(triggers >= Math.floor(GAMES / 2), `black holes triggered suspiciously rarely: ${triggers} across ${GAMES} games`);
 assert(repeatedSquares > 0, 'fuzz run never exercised a same-square rearm');
 assert(relocations > 0, 'fuzz run never exercised a voluntary relocation');
+assert(sharedSquares > 0, 'fuzz run never exercised overlapping active traps');
 ok(`${GAMES} random games preserved relocation, one-use trap and replay invariants`);
 summary('fuzz.test.mjs');

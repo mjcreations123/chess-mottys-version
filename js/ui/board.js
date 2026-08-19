@@ -21,11 +21,13 @@ export class BoardView {
     this.ownBlackHole = null;
     this.spentSquare = null;
     this.busy = false;             // true while an animation runs
+    this.renderVersion = 0;        // invalidates animation work after a new position
+    this.promotionCancel = null;
     this.focusSq = 'e2';
     this.reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     this.el.setAttribute('role', 'grid');
-    this.el.setAttribute('tabindex', '0');
+    this.el.setAttribute('tabindex', '-1');
     this.el.setAttribute('aria-label', 'Chess board. Use arrow keys to move between squares and Enter to select.');
     this.#buildSquares();
     this.#bindPointer();
@@ -81,6 +83,7 @@ export class BoardView {
   setOrientation(color) {
     const want = color === 'b';
     if (want === this.flipped) return;
+    this.#invalidateTransientState();
     this.flipped = want;
     for (const row of this.el.querySelectorAll('.board-row')) row.remove();
     this.#buildSquares();
@@ -92,6 +95,7 @@ export class BoardView {
 
   /* ---------- pieces ---------- */
   setPosition(map) {
+    this.#invalidateTransientState();
     for (const [, elm] of this.pieces) elm.remove();
     this.pieces.clear();
     for (const [sq, p] of map) this.#spawn(sq, p);
@@ -124,6 +128,7 @@ export class BoardView {
 
   /* ---------- animations ---------- */
   async animateMove({ from, to, rookFrom, rookTo, epSquare, promotion, color }) {
+    const version = this.renderVersion;
     this.busy = true;
     const mover = this.pieces.get(from);
     if (!mover) { this.busy = false; return; }
@@ -143,6 +148,7 @@ export class BoardView {
     }
 
     await wait(this.reduceMotion ? 0 : 165);
+    if (version !== this.renderVersion) return;
     if (victimSq && this.pieces.has(victimSq)) {
       this.pieces.get(victimSq).remove();
       this.pieces.delete(victimSq);
@@ -157,7 +163,8 @@ export class BoardView {
     this.busy = false;
   }
 
-  async animateBlackHole({ square }) {
+  async animateBlackHole({ square, consumeOwnHole = true }) {
+    const version = this.renderVersion;
     this.busy = true;
     const piece = this.pieces.get(square);
     const cell = this.el.querySelector(`[data-sq="${square}"]`);
@@ -180,17 +187,26 @@ export class BoardView {
       await wait(360);
     }
 
+    if (version !== this.renderVersion) {
+      burst.remove();
+      cell?.classList.remove('sq--imploding', 'sq--reopening');
+      return;
+    }
+
     if (piece) {
       piece.remove();
       this.pieces.delete(square);
     }
     burst.remove();
-    if (this.ownBlackHole === square) this.ownBlackHole = null;
+    // Two secret traps may share a square. If MottyBot's trap fired there,
+    // keep the player's still-active marker visible through the animation.
+    if (consumeOwnHole && this.ownBlackHole === square) this.ownBlackHole = null;
     this.spentSquare = square;
     this.#applySquareStates();
     cell?.classList.remove('sq--imploding');
     cell?.classList.add('sq--reopening');
     if (!this.reduceMotion) await wait(240);
+    if (version !== this.renderVersion) return;
     cell?.classList.remove('sq--reopening');
     try { navigator.vibrate?.([18, 28, 24]); } catch {}
     this.busy = false;
@@ -264,6 +280,7 @@ export class BoardView {
 
   /* ---------- input ---------- */
   setInteractive(color, legalProvider) {
+    this.#cancelPromotion();
     this.holeSelector = null;
     this.interactiveColor = color;
     this.legalProvider = legalProvider || (() => []);
@@ -272,6 +289,7 @@ export class BoardView {
       elm.classList.toggle('piece--draggable', !!color && elm.dataset.color === color);
     }
     this.el.setAttribute('aria-disabled', color ? 'false' : 'true');
+    this.el.tabIndex = color ? 0 : -1;
     this.el.setAttribute('aria-label', 'Chess board. Use arrow keys to move between squares and Enter to select.');
     this.#applySquareStates();
   }
@@ -282,6 +300,7 @@ export class BoardView {
     choiceLabel = 'available for your black hole',
     onCancel = null,
   } = {}) {
+    this.#cancelPromotion();
     this.interactiveColor = null;
     this.legalProvider = () => [];
     this.#select(null);
@@ -301,6 +320,7 @@ export class BoardView {
       this.#syncFocus();
     }
     this.el.setAttribute('aria-disabled', 'false');
+    this.el.tabIndex = 0;
     this.el.setAttribute('aria-label', instruction);
     this.#applySquareStates();
   }
@@ -453,10 +473,21 @@ export class BoardView {
   }
 
   askPromotion(sq, color) {
+    this.#cancelPromotion();
     return new Promise((resolve) => {
       const { row, col } = this.squareToRC(sq);
       const box = document.createElement('div');
       box.className = 'promo';
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        if (this.promotionCancel === cancel) this.promotionCancel = null;
+        box.remove();
+        resolve(value);
+      };
+      const cancel = () => finish(null);
+      this.promotionCancel = cancel;
       const goingDown = row === 0;
       box.style.left = `${col * 12.5}%`;
       box.style[goingDown ? 'top' : 'bottom'] = '0';
@@ -465,7 +496,7 @@ export class BoardView {
         b.type = 'button';
         b.innerHTML = pieceUse(color, t);
         b.addEventListener('pointerdown', (e) => e.stopPropagation());
-        b.addEventListener('click', (e) => { e.stopPropagation(); box.remove(); resolve(t); });
+        b.addEventListener('click', (e) => { e.stopPropagation(); finish(t); });
         box.appendChild(b);
       }
       const x = document.createElement('button');
@@ -473,10 +504,30 @@ export class BoardView {
       x.className = 'promo__close';
       x.textContent = '×';
       x.addEventListener('pointerdown', (e) => e.stopPropagation());
-      x.addEventListener('click', (e) => { e.stopPropagation(); box.remove(); resolve(null); });
+      x.addEventListener('click', (e) => { e.stopPropagation(); finish(null); });
       box.appendChild(x);
       this.el.appendChild(box);
     });
+  }
+
+  #cancelPromotion() {
+    const cancel = this.promotionCancel;
+    this.promotionCancel = null;
+    cancel?.();
+  }
+
+  #invalidateTransientState() {
+    this.renderVersion++;
+    this.busy = false;
+    if (this.drag) {
+      this.drag.elm.classList.remove('piece--dragging');
+      this.drag = null;
+    }
+    this.#cancelPromotion();
+    for (const transient of this.el.querySelectorAll('.hole-burst, .promo')) transient.remove();
+    for (const cell of this.el.querySelectorAll('.sq--imploding, .sq--reopening')) {
+      cell.classList.remove('sq--imploding', 'sq--reopening');
+    }
   }
 }
 

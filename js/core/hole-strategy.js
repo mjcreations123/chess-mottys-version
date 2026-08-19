@@ -3,7 +3,8 @@
 // This module deliberately receives no opponent black-hole square. It studies
 // only the visible chess position, forecasts MottyBot's next move when needed,
 // and ranks empty squares by how valuable and likely an opponent landing would
-// be. The coordinator may reject a collision without revealing why.
+// be. Its ranked choice is used as-is; sharing the opponent's hidden square is
+// legal and does not reveal either trap.
 
 import { Chess } from '../vendor/chess.js';
 import { eligibleBlackHoleSquares } from './black-hole.js';

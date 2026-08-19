@@ -7,7 +7,7 @@
   <title>Chess (Motty's Version)</title>
   <meta name="description" content="Black Hole Chess against MottyBot. Hide a one-use trap, relocate it up to three times, and erase any opposing piece that finds it.">
   <meta property="og:title" content="Chess (Motty's Version)">
-  <meta property="og:description" content="Hide a one-use black hole, relocate it by spending your turn, and erase any opposing piece that finds it.">
+  <meta property="og:description" content="Each side hides a one-use black hole. Move yours by spending a turn, and erase any opposing piece that finds it.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://chess-mottys-version.vercel.app/">
   <meta property="og:image" content="https://chess-mottys-version.vercel.app/og-card.png">
@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <a class="skip-link" href="#board">Skip to the board</a>
+  <a class="skip-link" id="skip-link" href="#panel">Skip to game controls</a>
 
   <header class="topbar">
     <a class="brand" href="/" aria-label="Chess, Motty's Version home">
@@ -60,6 +60,18 @@
         <div class="think-state" id="top-thinking" hidden>MottyBot is thinking</div>
       </div>
 
+      <div class="board-action" id="board-action" hidden>
+        <svg viewBox="0 0 28 28" aria-hidden="true">
+          <circle cx="14" cy="14" r="9"/>
+          <circle cx="14" cy="14" r="3.25" fill="currentColor" stroke="none"/>
+        </svg>
+        <div>
+          <strong id="board-action-title"></strong>
+          <span id="board-action-copy"></span>
+        </div>
+        <button class="board-action__cancel" id="board-action-cancel" type="button" hidden>Cancel</button>
+      </div>
+
       <div class="board-frame">
         <div class="board" id="board" aria-describedby="board-help"></div>
       </div>
@@ -94,7 +106,7 @@
       </div>
     </section>
 
-    <aside class="matchdesk" id="panel" aria-label="Match controls"></aside>
+    <aside class="matchdesk" id="panel" tabindex="-1" aria-label="Match controls"></aside>
   </main>
 
   <div class="modal-scrim" id="modal-scrim" hidden>
