@@ -276,7 +276,12 @@ export class BoardView {
     this.#applySquareStates();
   }
 
-  setHoleSelection(squares, onSelect, { previousSquare = null } = {}) {
+  setHoleSelection(squares, onSelect, {
+    previousSquare = null,
+    instruction = 'Choose an empty square for your secret black hole. Use arrow keys and press Enter to place it.',
+    choiceLabel = 'available for your black hole',
+    onCancel = null,
+  } = {}) {
     this.interactiveColor = null;
     this.legalProvider = () => [];
     this.#select(null);
@@ -284,6 +289,8 @@ export class BoardView {
       eligible: new Set(squares || []),
       onSelect: onSelect || (() => {}),
       previousSquare,
+      choiceLabel,
+      onCancel,
     };
     for (const [, elm] of this.pieces) elm.classList.remove('piece--draggable');
     if (previousSquare && this.holeSelector.eligible.has(previousSquare)) {
@@ -294,7 +301,7 @@ export class BoardView {
       this.#syncFocus();
     }
     this.el.setAttribute('aria-disabled', 'false');
-    this.el.setAttribute('aria-label', 'Choose an empty square for your secret black hole. Use arrow keys and press Enter to place it.');
+    this.el.setAttribute('aria-label', instruction);
     this.#applySquareStates();
   }
 
@@ -311,6 +318,14 @@ export class BoardView {
   }
   #bindKeyboard() {
     this.el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.holeSelector?.onCancel && !this.busy) {
+        e.preventDefault();
+        const callback = this.holeSelector.onCancel;
+        this.holeSelector = null;
+        this.#applySquareStates();
+        callback();
+        return;
+      }
       const { row, col } = this.squareToRC(this.focusSq);
       let next = null;
       if (e.key === 'ArrowUp') next = this.rcToSquare(Math.max(0, row - 1), col);
@@ -342,7 +357,7 @@ export class BoardView {
       const suffix = piece ? `${piece.dataset.color === 'w' ? 'white' : 'black'} ${names[piece.dataset.type]}` : 'empty';
       const selected = this.selected === sq.dataset.sq ? ', selected' : '';
       const ownHole = this.ownBlackHole === sq.dataset.sq ? ', your active black hole' : '';
-      const choice = this.holeSelector?.eligible.has(sq.dataset.sq) ? ', available for your black hole' : '';
+      const choice = this.holeSelector?.eligible.has(sq.dataset.sq) ? `, ${this.holeSelector.choiceLabel}` : '';
       const repeat = this.holeSelector?.previousSquare === sq.dataset.sq
         ? ', previous black-hole square, available again'
         : this.spentSquare === sq.dataset.sq ? ', black hole spent, square is open again' : '';

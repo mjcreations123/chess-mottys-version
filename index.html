@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#15191c">
   <title>Chess (Motty's Version)</title>
-  <meta name="description" content="Black Hole Chess against MottyBot. Hide a one-use trap, erase the piece that finds it, then arm any empty square again.">
+  <meta name="description" content="Black Hole Chess against MottyBot. Hide a one-use trap, relocate it up to three times, and erase any opposing piece that finds it.">
   <meta property="og:title" content="Chess (Motty's Version)">
-  <meta property="og:description" content="You and MottyBot each hide a one-use black hole. A trapped piece vanishes, the square reopens and its owner secretly arms another.">
+  <meta property="og:description" content="Hide a one-use black hole, relocate it by spending your turn, and erase any opposing piece that finds it.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://chess-mottys-version.vercel.app/">
   <meta property="og:image" content="https://chess-mottys-version.vercel.app/og-card.png">
@@ -88,7 +88,7 @@
         </svg>
         <div class="magic-strip__copy">
           <strong id="magic-title">Choose your secret square</strong>
-          <span id="magic-copy">Your black hole works once. The square reopens when it is triggered.</span>
+          <span id="magic-copy">Your black hole works once and may be relocated by spending your turn.</span>
         </div>
         <div class="magic-strip__route" id="magic-route" hidden></div>
       </div>

@@ -1,8 +1,9 @@
-// v6 makes a triggered square immediately reusable. v5 games described
-// permanent terrain and cannot be resumed under the corrected rule.
-const ACTIVE_KEY = 'mv-active-v6';
+// v7 adds turn-forfeiting black-hole relocations. Existing v6 games remain
+// compatible and are upgraded the next time they are saved.
+const ACTIVE_KEY = 'mv-active-v7';
+const LEGACY_ACTIVE_KEY = 'mv-active-v6';
 const STATS_KEY = 'mv-stats-v3';
-const RULES_KEY = 'mv-rules-seen-v5';
+const RULES_KEY = 'mv-rules-seen-v6';
 
 const read = (key, fallback) => {
   try {
@@ -14,17 +15,22 @@ const read = (key, fallback) => {
 };
 
 export function loadActive() {
-  const data = read(ACTIVE_KEY, null);
-  if (!data || data.version !== 6 || typeof data.seed !== 'string' || !Array.isArray(data.actions)) return null;
-  if (!['w', 'b'].includes(data.myColor)) return null;
-  if (!['easy', 'medium', 'hard'].includes(data.level)) return null;
-  return data;
+  const valid = (data) => data
+    && [6, 7].includes(data.version)
+    && typeof data.seed === 'string'
+    && Array.isArray(data.actions)
+    && ['w', 'b'].includes(data.myColor)
+    && ['easy', 'medium', 'hard'].includes(data.level);
+  const current = read(ACTIVE_KEY, null);
+  if (valid(current)) return current;
+  const legacy = read(LEGACY_ACTIVE_KEY, null);
+  return valid(legacy) ? legacy : null;
 }
 
 export function saveActive({ seed, actions, myColor, level, startedAt = Date.now() }) {
   try {
     localStorage.setItem(ACTIVE_KEY, JSON.stringify({
-      version: 6,
+      version: 7,
       seed,
       actions,
       myColor,
@@ -32,11 +38,15 @@ export function saveActive({ seed, actions, myColor, level, startedAt = Date.now
       startedAt,
       savedAt: Date.now(),
     }));
+    localStorage.removeItem(LEGACY_ACTIVE_KEY);
   } catch { /* storage failure must never interrupt a game */ }
 }
 
 export function clearActive() {
-  try { localStorage.removeItem(ACTIVE_KEY); } catch {}
+  try {
+    localStorage.removeItem(ACTIVE_KEY);
+    localStorage.removeItem(LEGACY_ACTIVE_KEY);
+  } catch {}
 }
 
 export function loadStats() {

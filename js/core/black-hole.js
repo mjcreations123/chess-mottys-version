@@ -8,6 +8,7 @@ import { SQUARES } from './fen.js';
 import { makeRng, seedFromString } from './rng.js';
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+export const MAX_RELOCATIONS = 3;
 
 const otherColor = (color) => color === 'w' ? 'b' : 'w';
 
@@ -27,6 +28,7 @@ export class BlackHoleMatch {
     this.blackHoles = { w: null, b: null };
     this.selectionCount = { w: 0, b: 0 };
     this.triggeredCount = { w: 0, b: 0 };
+    this.relocationCount = { w: 0, b: 0 };
     this.lastTriggered = { w: null, b: null };
     this.requiredSelections = new Set(['w', 'b']);
     this.resolutionPending = false;
@@ -43,10 +45,29 @@ export class BlackHoleMatch {
   blackHolesTriggered(color) {
     return color ? (this.triggeredCount[color] || 0) : this.triggeredCount.w + this.triggeredCount.b;
   }
+  relocationsUsed(color) { return this.relocationCount[color] || 0; }
+  relocationsRemaining(color) { return Math.max(0, MAX_RELOCATIONS - this.relocationsUsed(color)); }
 
   eligibleBlackHoles(color) {
     if (!['w', 'b'].includes(color)) return [];
     return eligibleBlackHoleSquares(this.chess);
+  }
+
+  eligibleRelocationSquares(color) {
+    if (!['w', 'b'].includes(color) || !this.blackHoles[color]) return [];
+    return eligibleBlackHoleSquares(this.chess, [this.blackHoles[color]]);
+  }
+
+  canRelocateBlackHole(color) {
+    return ['w', 'b'].includes(color)
+      && this.turn() === color
+      && this.readyToPlay()
+      && !this.resolutionPending
+      && !this.status().over
+      && !this.chess.isCheck()
+      && Boolean(this.blackHoles[color])
+      && this.relocationsRemaining(color) > 0
+      && this.eligibleRelocationSquares(color).length > 0;
   }
 
   selectBlackHole(color, square, { automatic = false } = {}) {
@@ -100,6 +121,56 @@ export class BlackHoleMatch {
     const sequence = this.selectionCount[color] + 1;
     const rng = makeRng(seedFromString(`${this.seed}#black-hole#${color}#${sequence}`));
     return this.selectBlackHole(color, choices[rng.int(choices.length)], { automatic: true });
+  }
+
+  relocateBlackHole(color, square, { automatic = false } = {}) {
+    if (!['w', 'b'].includes(color)) throw new Error(`invalid black-hole color ${color}`);
+    if (this.turn() !== color) throw new Error(`it is not ${color}'s turn`);
+    if (!this.readyToPlay()) throw new Error('black-hole selection required');
+    if (this.resolutionPending) throw new Error('black-hole resolution pending');
+    if (this.status().over) throw new Error('game is over');
+    if (this.chess.isCheck()) throw new Error('cannot relocate while in check');
+    if (!this.blackHoles[color]) throw new Error(`${color} has no active black hole`);
+    if (this.relocationsRemaining(color) <= 0) throw new Error(`${color} has no relocations left`);
+
+    const from = this.blackHoles[color];
+    if (square === from) throw new Error('choose a different black-hole square');
+    if (!this.eligibleRelocationSquares(color).includes(square)) {
+      throw new Error(`black hole cannot be relocated to ${square}`);
+    }
+
+    const fenBefore = this.fen();
+    // A voluntary relocation is the whole turn. chess.js's null move keeps
+    // castling rights, advances the clocks, expires en passant and changes the
+    // side to move without changing any piece square.
+    this.chess.move('--');
+
+    const opponent = otherColor(color);
+    let displaced = null;
+    if (this.blackHoles[opponent] === square) {
+      this.blackHoles[opponent] = null;
+      this.requiredSelections.add(opponent);
+      displaced = opponent;
+    }
+
+    this.blackHoles[color] = square;
+    const used = ++this.relocationCount[color];
+    const event = {
+      kind: 'relocation',
+      ply: this.ply,
+      color,
+      from,
+      to: square,
+      used,
+      remaining: this.relocationsRemaining(color),
+      automatic,
+      displaced,
+      fenBefore,
+      fenAfter: this.fen(),
+    };
+    this.log.push(event);
+    this.ply++;
+    return event;
   }
 
   status() {
@@ -269,6 +340,9 @@ export class BlackHoleMatch {
       if (event.kind === 'placement') {
         return [{ kind: 'place', color: event.color, square: event.square, automatic: event.automatic }];
       }
+      if (event.kind === 'relocation') {
+        return [{ kind: 'relocate', color: event.color, from: event.from, to: event.to, automatic: event.automatic }];
+      }
       if (event.kind === 'move') return [{ kind: 'move', uci: event.uci }];
       if (event.kind === 'resign') return [{ kind: 'resign', color: event.color }];
       return [];
@@ -281,6 +355,11 @@ export function replayMatch(seed, actions) {
   for (const action of actions) {
     if (action?.kind === 'place') {
       match.selectBlackHole(action.color, action.square, { automatic: Boolean(action.automatic) });
+    } else if (action?.kind === 'relocate') {
+      if (action.from && match.activeBlackHole(action.color) !== action.from) {
+        throw new Error('relocation origin does not match the active black hole');
+      }
+      match.relocateBlackHole(action.color, action.to, { automatic: Boolean(action.automatic) });
     } else if (action?.kind === 'move' && typeof action.uci === 'string') {
       match.applyMove({
         from: action.uci.slice(0, 2),

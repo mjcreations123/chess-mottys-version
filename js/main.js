@@ -268,7 +268,7 @@ function panelHome() {
       <div class="rule-sequence" role="group" aria-label="How a turn works">
         <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Hide one black hole</strong><p>Choose any empty square. You see yours. MottyBot never gets yours.</p></div></div>
         <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Play legal chess</strong><p>If an opponent lands on your square, that piece falls in. The square immediately reopens.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Hide the next one</strong><p>Each trap works once. Reuse the same square or choose a different empty one.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Re-arm or relocate</strong><p>Replace a used trap for free, or spend up to three turns moving an active one.</p></div></div>
       </div>
       <div class="button-stack">
         <button class="btn btn--primary" id="choose-game">
@@ -350,6 +350,10 @@ function panelPlaying() {
       <div class="match-title"><h2>${escapeHTML(state.bot.name)}</h2><span class="difficulty-label">${escapeHTML(state.bot.label)} difficulty</span></div>
       <p>Your black hole is ${ownHole ? `<strong>${escapeHTML(ownHole)}</strong>` : 'waiting to be placed'}. MottyBot's is hidden.</p>
     </div>
+    <div class="relocate-action" role="group" aria-label="Black-hole relocation">
+      <button class="btn btn--magic" id="relocate-hole" type="button" aria-describedby="relocate-status">Move black hole</button>
+      <span id="relocate-status"></span>
+    </div>
     <div class="desk-body desk-body--moves"><div class="move-list" id="move-list"></div></div>
     <div class="desk-footer">
       <button class="btn btn--danger" id="resign-game">Resign</button>
@@ -357,7 +361,9 @@ function panelPlaying() {
     </div>`;
   $('resign-game').onclick = confirmResign;
   $('game-rules').onclick = showRules;
+  $('relocate-hole').onclick = beginPlayerRelocation;
   renderMoveList();
+  updateRelocateControl();
 }
 
 function panelPostGame() {
@@ -365,7 +371,7 @@ function panelPostGame() {
   panel.innerHTML = `
     <div class="desk-head">
       <div class="match-title"><h2>Final position</h2><span class="difficulty-label">${escapeHTML(state.bot.label)} difficulty</span></div>
-      <p>The moves, secret choices and every one-use trap remain available for review.</p>
+      <p>The moves, relocations, secret choices and every one-use trap remain available for review.</p>
     </div>
     <div class="desk-body desk-body--moves"><div class="move-list" id="move-list"></div></div>
     <div class="desk-footer">
@@ -384,16 +390,24 @@ function renderMoveList() {
   const blocks = [];
   for (let i = 0; i < log.length; i++) {
     const entry = log[i];
-    if (entry.kind !== 'move') continue;
-    const trigger = log[i + 1]?.kind === 'black-hole' ? log[i + 1] : null;
-    const number = Math.floor(entry.ply / 2) + 1;
-    blocks.push(`
-      <div class="turn-record">
-        <div class="move-line"><span class="move-number">${number}${entry.color === 'w' ? '.' : '…'}</span><span class="move-san">${escapeHTML(entry.san)}</span><span class="move-side">${entry.color === state.myColor ? 'You' : 'MottyBot'}</span></div>
-        ${trigger ? `<div class="hole-line">${capitalize(PIECE_NAMES[trigger.piece.type])} lost at ${trigger.square}. Square reopened.</div>` : ''}
-      </div>`);
+    if (entry.kind === 'move') {
+      const trigger = log[i + 1]?.kind === 'black-hole' ? log[i + 1] : null;
+      const number = Math.floor(entry.ply / 2) + 1;
+      blocks.push(`
+        <div class="turn-record">
+          <div class="move-line"><span class="move-number">${number}${entry.color === 'w' ? '.' : '…'}</span><span class="move-san">${escapeHTML(entry.san)}</span><span class="move-side">${entry.color === state.myColor ? 'You' : 'MottyBot'}</span></div>
+          ${trigger ? `<div class="hole-line">${capitalize(PIECE_NAMES[trigger.piece.type])} lost at ${trigger.square}. Square reopened.</div>` : ''}
+        </div>`);
+    } else if (entry.kind === 'relocation') {
+      const number = Math.floor(entry.ply / 2) + 1;
+      blocks.push(`
+        <div class="turn-record turn-record--relocation">
+          <div class="move-line"><span class="move-number">${number}${entry.color === 'w' ? '.' : '…'}</span><span class="move-san">Black hole ${entry.from} to ${entry.to}</span><span class="move-side">${entry.color === state.myColor ? 'You' : 'MottyBot'}</span></div>
+          <div class="hole-line">Turn used. ${entry.remaining} ${entry.remaining === 1 ? 'change' : 'changes'} left.</div>
+        </div>`);
+    }
   }
-  wrap.innerHTML = blocks.length ? blocks.join('') : '<div class="empty-log">Your moves and every triggered black hole will appear here.</div>';
+  wrap.innerHTML = blocks.length ? blocks.join('') : '<div class="empty-log">Your moves, relocations and every triggered black hole will appear here.</div>';
   const scroller = wrap.closest('.desk-body--moves');
   if (scroller) scroller.scrollTop = scroller.scrollHeight;
 }
@@ -419,6 +433,27 @@ function configureBoardForMatch() {
 
 function opposingColor(color) { return color === 'w' ? 'b' : 'w'; }
 
+function updateRelocateControl() {
+  const button = $('relocate-hole');
+  const status = $('relocate-status');
+  if (!button || !status || !state.match) return;
+
+  const match = state.match;
+  const remaining = match.relocationsRemaining(state.myColor);
+  const myTurn = state.screen === 'playing' && !state.over && match.turn() === state.myColor;
+  const inCheck = myTurn && match.status().check;
+  const hasAlternative = match.eligibleRelocationSquares(state.myColor).length > 0;
+  const available = myTurn && match.canRelocateBlackHole(state.myColor);
+
+  button.disabled = !available;
+  if (remaining <= 0) status.textContent = 'All 3 changes used';
+  else if (!match.activeBlackHole(state.myColor)) status.textContent = 'Waiting for your next trap';
+  else if (inCheck) status.textContent = `Answer check first · ${remaining} left`;
+  else if (!hasAlternative) status.textContent = `No other empty square · ${remaining} left`;
+  else if (!myTurn) status.textContent = `Available on your turn · ${remaining} left`;
+  else status.textContent = `Uses this turn · ${remaining} left`;
+}
+
 function panelHolePlacement({ initial = false, previousSquare = null } = {}) {
   panel.className = 'matchdesk matchdesk--placing';
   panel.innerHTML = `
@@ -429,21 +464,129 @@ function panelHolePlacement({ initial = false, previousSquare = null } = {}) {
     <div class="desk-body">
       <div class="placement-note">
         <strong>${initial ? 'Your trap works once.' : `${previousSquare} is open again.`}</strong>
-        <p>${initial ? 'When MottyBot lands on it, that piece disappears. The square then returns to normal.' : `You may arm ${previousSquare} again or choose any other empty square.`}</p>
+        <p>${initial ? 'When MottyBot lands on it, that piece disappears. Later, you may also spend up to three turns moving an active trap.' : `You may arm ${previousSquare} again or choose any other empty square.`}</p>
       </div>
     </div>`;
 }
 
+function panelRelocation(currentSquare, remaining) {
+  panel.className = 'matchdesk matchdesk--placing';
+  panel.innerHTML = `
+    <div class="desk-head">
+      <h2>Choose a new square.</h2>
+      <p>Move your black hole from <strong>${escapeHTML(currentSquare)}</strong> to a different empty square.</p>
+    </div>
+    <div class="desk-body">
+      <div class="placement-note">
+        <strong>This uses your whole turn.</strong>
+        <p>The change counts only after you choose a square. You will have ${remaining - 1} ${remaining - 1 === 1 ? 'change' : 'changes'} left.</p>
+      </div>
+    </div>
+    <div class="desk-footer"><button class="btn btn--secondary" id="cancel-relocation" type="button">Cancel</button></div>`;
+}
+
 function showArmedHoleStatus() {
   const own = state.match?.activeBlackHole(state.myColor);
+  const remaining = state.match?.relocationsRemaining(state.myColor) || 0;
   setHoleStatus({
     phase: 'armed',
     title: own ? 'Your black hole is armed' : 'No black hole can be placed',
     copy: own
-      ? `MottyBot chose its own hidden trap. Every spent square returns to normal.`
+      ? remaining
+        ? `Moving it uses your turn. ${remaining} of 3 optional changes remain.`
+        : 'All three optional changes are used. Every spent square still returns to normal.'
       : 'There are no eligible empty squares left.',
     route: own || '',
   });
+}
+
+function beginPlayerRelocation() {
+  const match = state.match;
+  const serial = state.serial;
+  if (!match || state.over || state.animating || state.screen !== 'playing' || !match.canRelocateBlackHole(state.myColor)) {
+    sound.illegal();
+    updateRelocateControl();
+    return;
+  }
+
+  const currentSquare = match.activeBlackHole(state.myColor);
+  const remaining = match.relocationsRemaining(state.myColor);
+  const choices = match.eligibleRelocationSquares(state.myColor);
+  state.screen = 'relocating';
+  setYourTurn(false);
+  clearTaunt();
+  panelRelocation(currentSquare, remaining);
+  board.setBlackHoleState({ own: currentSquare, spent: null });
+
+  const cancel = () => {
+    if (state.serial !== serial || state.match !== match || state.over || state.screen !== 'relocating') return;
+    state.screen = 'playing';
+    syncBoard();
+    panelPlaying();
+    showArmedHoleStatus();
+    botLoop(serial);
+    announce('Black-hole relocation canceled. Your turn continues.');
+    requestAnimationFrame(() => board.el.focus());
+  };
+
+  const handleSelection = async (square) => {
+    if (state.serial !== serial || state.match !== match || state.over || state.screen !== 'relocating') return;
+    let relocation;
+    try {
+      relocation = match.relocateBlackHole(state.myColor, square);
+    } catch {
+      sound.illegal();
+      board.setHoleSelection(choices, handleSelection, {
+        instruction: 'Choose a different empty square for your black hole. Use arrow keys and press Enter to move it, or Escape to cancel.',
+        choiceLabel: 'available for black-hole relocation',
+        onCancel: cancel,
+      });
+      return;
+    }
+
+    state.plannedBotMove = null;
+    state.screen = 'playing';
+    syncBoard();
+    panelPlaying();
+    setYourTurn(false);
+    board.setInteractive(null);
+    sound.move();
+    setHoleStatus({
+      phase: 'armed',
+      title: `Your black hole moved to ${square}`,
+      copy: `Your turn is spent. ${relocation.remaining} ${relocation.remaining === 1 ? 'change remains' : 'changes remain'}.`,
+      route: square,
+    });
+    persistGame();
+    announce(`Your black hole moved from ${relocation.from} to ${square}. Your turn is over.`);
+
+    if (match.status().over) {
+      endGame();
+      return;
+    }
+    const botColor = opposingColor(state.myColor);
+    if (relocation.displaced === botColor && match.selectionRequired(botColor)) {
+      await chooseBotBlackHole();
+    }
+    if (state.serial !== serial || state.match !== match || state.over) return;
+    persistGame();
+    botLoop(serial);
+  };
+
+  $('cancel-relocation').onclick = cancel;
+  board.setHoleSelection(choices, handleSelection, {
+    instruction: 'Choose a different empty square for your black hole. Use arrow keys and press Enter to move it, or Escape to cancel.',
+    choiceLabel: 'available for black-hole relocation',
+    onCancel: cancel,
+  });
+  setHoleStatus({
+    phase: 'selecting',
+    title: 'Move your black hole',
+    copy: `Choose a different empty square or cancel. Selecting a square ends your turn.`,
+    route: `${remaining} left`,
+  });
+  announce(`Choose a different empty square for your black hole. You have ${remaining} changes left. Canceling keeps your turn.`);
+  requestAnimationFrame(() => board.el.focus());
 }
 
 async function chooseBotBlackHole() {
@@ -708,11 +851,13 @@ async function botLoop(serial) {
       setYourTurn(true);
       board.setInteractive(state.myColor, (square) => match.legalMoves(square));
       showArmedHoleStatus();
+      updateRelocateControl();
       announce(status.check ? 'Your king is in check. Your move.' : 'Your move.');
       return;
     }
 
     setYourTurn(false);
+    updateRelocateControl();
     board.setInteractive(null);
     setThinking(true);
     const started = performance.now();
@@ -750,6 +895,7 @@ async function handleUserMove({ from, to, promotion, instant }) {
     return;
   }
   setYourTurn(false);
+  updateRelocateControl();
   board.setInteractive(null);
   persistGame();
   await playMoveAnimation(move, { instant });
@@ -907,6 +1053,20 @@ function buildReplayFrames() {
         ownHole: active[state.myColor],
         spent: null,
       });
+    } else if (entry.kind === 'relocation') {
+      if (entry.displaced) active[entry.displaced] = null;
+      active[entry.color] = entry.to;
+      if (entry.color === state.myColor) {
+        frames.push({
+          fen: entry.fenAfter,
+          kind: 'relocation',
+          label: `Your black hole: ${entry.from} to ${entry.to}`,
+          detail: `You used your turn and have ${entry.remaining} ${entry.remaining === 1 ? 'change' : 'changes'} left`,
+          ownHole: entry.to,
+          spent: null,
+          square: entry.to,
+        });
+      }
     } else if (entry.kind === 'black-hole') {
       active[entry.owner] = null;
       frames.push({
@@ -933,7 +1093,7 @@ function enterReplay() {
   state.replay = { frames: buildReplayFrames(), index: 0 };
   board.setInteractive(null);
   panel.innerHTML = `
-    <div class="desk-head"><h2>Review the game.</h2><p>Step through every move, secret-square choice and triggered trap.</p></div>
+    <div class="desk-head"><h2>Review the game.</h2><p>Step through every move, relocation, secret-square choice and triggered trap.</p></div>
     <div class="replay-readout"><strong id="replay-label"></strong><span id="replay-detail"></span></div>
     <div class="replay-controls" role="group" aria-label="Replay controls">
       <button id="replay-start" aria-label="First position">|‹</button>
@@ -971,6 +1131,8 @@ function setReplayFrame(index) {
     setHoleStatus({ phase: 'triggered', title: `Black hole opened on ${frame.square}`, copy: `${capitalize(victim)} ${PIECE_NAMES[frame.piece.type]} disappeared. The square reopened.`, route: frame.square });
   } else if (frame.kind === 'placement') {
     setHoleStatus({ phase: 'armed', title: 'Your black hole is armed', copy: frame.detail, route: frame.square });
+  } else if (frame.kind === 'relocation') {
+    setHoleStatus({ phase: 'armed', title: `Your black hole moved to ${frame.square}`, copy: frame.detail, route: frame.square });
   } else {
     setHoleStatus({ title: frame.label, copy: frame.detail });
   }
@@ -1040,8 +1202,9 @@ function showRules() {
         <li><span class="rule-mark">3</span><span><b>The landing piece disappears.</b> On a capture, the captured piece and the arriving piece can both leave the board. A castling rook can also trigger a trap where it lands.</span></li>
         <li><span class="rule-mark">4</span><span><b>The square opens again immediately.</b> It is a normal empty square as soon as the arriving piece disappears. Any piece may use it on a later move.</span></li>
         <li><span class="rule-mark">5</span><span><b>Every trap works once.</b> Its owner chooses another empty square before the next move. The same square may be chosen again if it is empty.</span></li>
-        <li><span class="rule-mark">6</span><span><b>Kings are not protected from black holes.</b> If your king lands on your opponent's trap, it falls in and you lose immediately.</span></li>
-        <li><span class="rule-mark">7</span><span><b>Normal endings still count.</b> Checkmate, stalemate, resignation and the fifty-move rule work normally. Bare kings can keep playing because a black hole can still decide the game.</span></li>
+        <li><span class="rule-mark">6</span><span><b>You may relocate an active black hole three times per game.</b> Choose a different empty square instead of making a chess move. Relocating ends your turn and is unavailable while your king is in check.</span></li>
+        <li><span class="rule-mark">7</span><span><b>Kings are not protected from black holes.</b> If your king lands on your opponent's trap, it falls in and you lose immediately.</span></li>
+        <li><span class="rule-mark">8</span><span><b>Normal endings still count.</b> Checkmate, stalemate, resignation and the fifty-move rule work normally. Bare kings can keep playing because a black hole can still decide the game.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);

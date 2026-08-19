@@ -47,12 +47,78 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   assert(match.legalMoves().length === 0, 'play continued before the replacement was selected');
   match.selectBlackHole('b', 'e5', { automatic: true });
   assert(match.activeBlackHole('b') === 'e5', 'the same square could not be armed again');
+  assert(match.relocationsRemaining('b') === 3, 'mandatory re-arming consumed a voluntary relocation');
   const rookRoute = match.legalMoves('e8').find((move) => move.to === 'e5');
   assert(rookRoute, 'an owner piece could not use the reopened square normally');
   match.applyMove({ from: 'e8', to: 'e5' });
   assert(match.resolveBlackHoleIfDue().length === 0, 'an owner piece triggered its rearmed black hole');
   assert(match.chess.get('e5')?.type === 'r', 'the reopened square did not behave like an ordinary square');
   ok('a spent square reopens immediately and may be armed again');
+}
+
+{
+  const match = at(
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    'd4', 'e4', 'relocate-turn',
+  );
+  let rejectedSame = false;
+  try { match.relocateBlackHole('w', 'd4'); } catch { rejectedSame = true; }
+  assert(rejectedSame && match.relocationsUsed('w') === 0 && match.turn() === 'w', 'same-square relocation consumed a turn or use');
+
+  const pieceField = match.fen().split(' ')[0];
+  const event = match.relocateBlackHole('w', 'c4');
+  assert(event.from === 'd4' && event.to === 'c4' && event.remaining === 2, 'relocation event was incorrect');
+  assert(match.activeBlackHole('w') === 'c4', 'active black hole did not move');
+  assert(match.turn() === 'b' && match.ply === 1, 'relocation did not consume White\'s turn');
+  assert(match.fen().split(' ')[0] === pieceField, 'relocation changed a chess piece square');
+  assert(match.fen().split(' ')[4] === '1', 'relocation did not advance the fifty-move clock');
+  assert(match.eligibleRelocationSquares('w').includes('d4'), 'old black-hole square did not become an ordinary relocation choice');
+  ok('a voluntary relocation moves only the trap and consumes the chess turn');
+}
+
+{
+  const match = at(
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    'd4', 'e4', 'relocate-limit',
+  );
+  const blackMoves = [
+    { from: 'e7', to: 'e5' },
+    { from: 'g8', to: 'f6' },
+    { from: 'b8', to: 'c6' },
+  ];
+  for (let index = 0; index < 3; index++) {
+    match.relocateBlackHole('w', index % 2 === 0 ? 'c4' : 'd4');
+    match.applyMove(blackMoves[index]);
+    match.resolveBlackHoleIfDue();
+  }
+  assert(match.relocationsRemaining('w') === 0 && match.turn() === 'w', 'three relocations did not exhaust the allowance');
+  let rejectedFourth = false;
+  try { match.relocateBlackHole('w', 'd4'); } catch { rejectedFourth = true; }
+  assert(rejectedFourth && match.relocationsUsed('w') === 3 && match.turn() === 'w', 'a fourth relocation was allowed or consumed state');
+  ok('each side is limited to three voluntary relocations');
+}
+
+{
+  const match = at('4k3/8/8/8/8/8/4r3/4K3 w - - 0 1', 'a4', 'b4', 'relocate-check');
+  assert(match.status().check, 'check fixture did not put White in check');
+  assert(!match.canRelocateBlackHole('w'), 'relocation was offered while the king was in check');
+  let rejected = false;
+  try { match.relocateBlackHole('w', 'c4'); } catch { rejected = true; }
+  assert(rejected && match.turn() === 'w' && match.relocationsUsed('w') === 0, 'illegal in-check relocation changed the game');
+  ok('relocation cannot replace the required answer to check');
+}
+
+{
+  const match = at(
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    'd4', 'c4', 'relocate-collision',
+  );
+  const event = match.relocateBlackHole('w', 'c4');
+  assert(event.displaced === 'b', 'relocation did not reconcile a hidden trap collision');
+  assert(match.activeBlackHole('w') === 'c4' && match.selectionRequired('b'), 'relocator did not keep the colliding square');
+  const replacement = match.selectFallbackBlackHole('b', ['c4']);
+  assert(replacement && replacement.square !== 'c4' && match.readyToPlay(), 'displaced opponent trap was not safely replaced');
+  ok('a secret collision during relocation preserves one active trap per side');
 }
 
 {
@@ -115,13 +181,16 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   original.applyMove({ from: 'e2', to: 'e4' });
   original.resolveBlackHoleIfDue();
   original.selectBlackHole('b', 'e4', { automatic: true });
+  original.relocateBlackHole('b', 'd5', { automatic: true });
   const restored = replayMatch(original.seed, original.serializedActions());
   assert(restored.fen() === original.fen(), `replay FEN drifted\n${restored.fen()}\n${original.fen()}`);
   assert(restored.blackHolesTriggered() === 1 && restored.lastTriggeredSquare('b') === 'e4', 'replay lost trigger history');
   assert(restored.activeBlackHole('w') === original.activeBlackHole('w')
     && restored.activeBlackHole('b') === original.activeBlackHole('b'), 'replay lost active black holes');
+  assert(restored.relocationsUsed('b') === 1 && restored.relocationsRemaining('b') === 2, 'replay lost relocation allowance');
   assert(restored.log.findLast((event) => event.kind === 'placement')?.automatic, 'replay lost automatic placement ownership');
-  ok('saved actions reproduce pieces, active traps and a same-square rearm');
+  assert(restored.log.findLast((event) => event.kind === 'relocation')?.automatic, 'replay lost relocation ownership');
+  ok('saved actions reproduce pieces, active traps, a same-square rearm and a relocation');
 }
 
 summary('black-hole.test.mjs');

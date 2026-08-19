@@ -8,6 +8,7 @@ let turns = 0;
 let triggers = 0;
 let repeatedSquares = 0;
 let kingFalls = 0;
+let relocations = 0;
 
 for (let game = 0; game < GAMES; game++) {
   const match = new BlackHoleMatch(`fuzz-${game}`);
@@ -16,11 +17,21 @@ for (let game = 0; game < GAMES; game++) {
   match.selectFallbackBlackHole('b');
 
   for (let step = 0; step < MAX_PLIES && !match.status().over; step++) {
-    const moves = match.legalMoves();
-    assert(moves.length > 0, `no legal moves in a live game ${game}:${step}`);
-    const chosen = moves[mover.int(moves.length)];
-    match.applyMove({ from: chosen.from, to: chosen.to, promotion: chosen.promotion });
-    const events = match.resolveBlackHoleIfDue();
+    const color = match.turn();
+    const opponent = color === 'w' ? 'b' : 'w';
+    const relocationChoices = match.eligibleRelocationSquares(color)
+      .filter((square) => square !== match.activeBlackHole(opponent));
+    let events = [];
+    if (relocationChoices.length && mover.next() < 0.055 && match.canRelocateBlackHole(color)) {
+      match.relocateBlackHole(color, relocationChoices[mover.int(relocationChoices.length)], { automatic: true });
+      relocations++;
+    } else {
+      const moves = match.legalMoves();
+      assert(moves.length > 0, `no legal moves in a live game ${game}:${step}`);
+      const chosen = moves[mover.int(moves.length)];
+      match.applyMove({ from: chosen.from, to: chosen.to, promotion: chosen.promotion });
+      events = match.resolveBlackHoleIfDue();
+    }
     turns++;
 
     if (events.length) {
@@ -57,6 +68,8 @@ for (let game = 0; game < GAMES; game++) {
     if (black && match.chess.get(black)) {
       assert(match.chess.get(black).color === 'b', `opponent survived on black black hole ${black}`);
     }
+    assert(match.relocationsUsed('w') <= 3 && match.relocationsUsed('b') <= 3,
+      `relocation limit exceeded in game ${game}:${step}`);
   }
 
   const restored = replayMatch(match.seed, match.serializedActions());
@@ -66,14 +79,17 @@ for (let game = 0; game < GAMES; game++) {
     && restored.lastTriggeredSquare('b') === match.lastTriggeredSquare('b'), `replay spent-square drift in game ${game}`);
   assert(restored.activeBlackHole('w') === match.activeBlackHole('w')
     && restored.activeBlackHole('b') === match.activeBlackHole('b'), `replay active-hole drift in game ${game}`);
+  assert(restored.relocationsUsed('w') === match.relocationsUsed('w')
+    && restored.relocationsUsed('b') === match.relocationsUsed('b'), `replay relocation count drift in game ${game}`);
   const actual = match.status();
   const replayed = restored.status();
   assert(actual.over === replayed.over && actual.winner === replayed.winner && actual.reason === replayed.reason,
     `replay result drift in game ${game}`);
 }
 
-console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${triggers} triggers, ${repeatedSquares} same-square re-arms, ${kingFalls} king falls`);
+console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${relocations} relocations, ${triggers} triggers, ${repeatedSquares} same-square re-arms, ${kingFalls} king falls`);
 assert(triggers >= Math.floor(GAMES / 2), `black holes triggered suspiciously rarely: ${triggers} across ${GAMES} games`);
 assert(repeatedSquares > 0, 'fuzz run never exercised a same-square rearm');
-ok(`${GAMES} random games preserved one-use trap and replay invariants`);
+assert(relocations > 0, 'fuzz run never exercised a voluntary relocation');
+ok(`${GAMES} random games preserved relocation, one-use trap and replay invariants`);
 summary('fuzz.test.mjs');
