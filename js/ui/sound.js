@@ -1,5 +1,5 @@
 // Tiny WebAudio synth: wooden clicks for moves and a short implosion for a
-// black-hole collapse.
+// black-hole trigger.
 // No samples, no network, nothing copyrighted.
 
 let ctx = null;

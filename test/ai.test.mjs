@@ -1,5 +1,5 @@
-// The bot must always produce a legal move, at every level, on boards with
-// collapsed squares too. Plus basic competence checks.
+// The bot must always produce a legal move at every level, including throughout
+// full black-hole games. Plus basic competence checks.
 import { Chess } from '../js/vendor/chess.js';
 import { BlackHoleMatch } from '../js/core/black-hole.js';
 import { think } from '../js/core/engine-ai.js';
@@ -12,21 +12,18 @@ const FAST = { timeMs: 120, blunderChance: 0 }; // keep CI quick; search quality
 for (const level of ['easy', 'medium', 'hard']) {
   for (let g = 0; g < 3; g++) {
     const m = new BlackHoleMatch(`ai-${level}-${g}`);
-    m.selectRandomBlackHole('w');
-    m.selectRandomBlackHole('b');
+    m.selectFallbackBlackHole('w');
+    m.selectFallbackBlackHole('b');
     for (let step = 0; step < 40; step++) {
       if (m.status().over) break;
-      const mv = think(m.fen(), level, `${level}-${g}-${step}`, {
-        ...FAST,
-        holes: m.collapsedSquares(),
-      });
+      const mv = think(m.fen(), level, `${level}-${g}-${step}`, FAST);
       assert(mv, `bot returned null with legal moves at ${level} g${g} s${step}`);
       // applyMove throws if illegal
       m.applyMove(mv);
       m.resolveBlackHoleIfDue();
       if (m.status().over) break;
       for (const color of ['w', 'b']) {
-        if (m.selectionRequired(color)) m.selectRandomBlackHole(color);
+        if (m.selectionRequired(color)) m.selectFallbackBlackHole(color);
       }
     }
   }

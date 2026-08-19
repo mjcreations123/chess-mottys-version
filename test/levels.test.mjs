@@ -1,58 +1,24 @@
-// The three levels must actually be three different opponents. Played as plain
-// chess so the result measures the engine rather than the hidden-square rule,
-// which is swingy enough to bury a skill gap over a handful of games.
-import { Chess } from '../js/vendor/chess.js';
+// A release-sized difficulty gate. It measures real search depth and samples
+// the deliberate move-selection behavior without running a half-hour engine
+// tournament on every weekly build.
 import { think, LEVELS } from '../js/core/engine-ai.js';
 import { assert, ok, summary } from './helpers.mjs';
 
-const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
-const GAMES = Number(process.env.LEVEL_GAMES || 4);
-const PLIES = 80;
+const uci = (move) => move.from + move.to + (move.promotion || '');
 
-// Returns the material edge for `a`, positive when `a` finished better.
-function match(a, b, gameSeed, aIsWhite) {
-  const board = new Chess();
-  for (let step = 0; step < PLIES && !board.isGameOver(); step++) {
-    const aToMove = (board.turn() === 'w') === aIsWhite;
-    const mv = think(board.fen(), aToMove ? a : b, `${gameSeed}-${step}`);
-    if (!mv) break;
-    board.move(mv);
-  }
-  if (board.isCheckmate()) {
-    const winnerIsWhite = board.turn() === 'b';
-    return (winnerIsWhite === aIsWhite) ? 1000 : -1000;
-  }
-  let edge = 0;
-  for (const cell of board.board().flat()) {
-    if (!cell || cell.type === 'k') continue;
-    edge += ((cell.color === 'w') === aIsWhite ? 1 : -1) * VALUE[cell.type];
-  }
-  return edge;
+{
+  assert(LEVELS.easy.maxDepth < LEVELS.medium.maxDepth && LEVELS.medium.maxDepth < LEVELS.hard.maxDepth,
+    'configured search depth does not rise with difficulty');
+  assert(LEVELS.easy.timeMs < LEVELS.medium.timeMs && LEVELS.medium.timeMs < LEVELS.hard.timeMs,
+    'thinking time does not rise with difficulty');
+  assert(LEVELS.easy.blunderChance > LEVELS.medium.blunderChance && LEVELS.medium.blunderChance > LEVELS.hard.blunderChance,
+    'deliberate inaccuracy does not fall with difficulty');
+  assert(LEVELS.hard.blunderChance === 0, 'Expert must not blunder on purpose');
+  ok('difficulty settings increase search and remove deliberate mistakes');
 }
 
-// Summed material edge rather than a win counter: two close games can both
-// finish inside a win margin and report a meaningless 0-0, which makes the
-// test flaky instead of informative. Total edge always says who was ahead.
-function series(strong, weak) {
-  let total = 0;
-  let decisive = 0;
-  for (let g = 0; g < GAMES; g++) {
-    const edge = match(strong, weak, `${strong}-${weak}-${g}`, g % 2 === 0);
-    total += edge;
-    if (Math.abs(edge) > 2) decisive += edge > 0 ? 1 : -1;
-  }
-  return { total, decisive };
-}
-
-for (const [strong, weak] of [['hard', 'easy'], ['medium', 'easy'], ['hard', 'medium']]) {
-  const { total, decisive } = series(strong, weak);
-  console.log(`  ${strong} vs ${weak}: material edge ${total > 0 ? '+' : ''}${total} over ${GAMES} games (decisive ${decisive >= 0 ? '+' : ''}${decisive})`);
-  assert(total > 0,
-    `${strong} did not outplay ${weak} (material edge ${total}); the levels are not distinct`);
-}
-ok('hard beats medium beats easy');
-
-// Each level must reach a clearly different depth on the same middlegame.
+// Each level must reach a clearly different depth on the same middlegame at
+// its real production clock.
 {
   const fen = 'r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4';
   const depths = {};
@@ -61,19 +27,52 @@ ok('hard beats medium beats easy');
     think(fen, level, 'depth-probe', { stats, blunderChance: 0 });
     depths[level] = stats.completedDepth || 0;
   }
-  console.log(`  depth reached: easy ${depths.easy}, medium ${depths.medium}, hard ${depths.hard}`);
-  assert(depths.medium > depths.easy, `medium (${depths.medium}) must search deeper than easy (${depths.easy})`);
-  assert(depths.hard > depths.medium, `hard (${depths.hard}) must search deeper than medium (${depths.medium})`);
-  assert(depths.hard >= 6, `hard only reached depth ${depths.hard}; that is not expert strength`);
-  ok(`the levels search to genuinely different depths (${depths.easy} / ${depths.medium} / ${depths.hard})`);
+  console.log(`  depth reached: casual ${depths.easy}, club ${depths.medium}, expert ${depths.hard}`);
+  assert(depths.medium > depths.easy, `Club (${depths.medium}) must search deeper than Casual (${depths.easy})`);
+  assert(depths.hard > depths.medium, `Expert (${depths.hard}) must search deeper than Club (${depths.medium})`);
+  assert(depths.hard >= 6, `Expert only reached depth ${depths.hard}`);
+  ok(`production clocks reach distinct depths (${depths.easy} / ${depths.medium} / ${depths.hard})`);
 }
 
-// Hard must never throw away a forced mate for variety.
+// At the same shallow search horizon, the configured personalities should
+// still differ: Casual often accepts a weaker candidate, Club rarely does,
+// and Expert always keeps the top-scored move.
 {
-  assert(LEVELS.hard.blunderChance === 0, 'hard must not blunder on purpose');
-  const mv = think('6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1', 'hard', 'mate-check');
-  assert(mv.from === 'a1' && mv.to === 'a8', `hard missed mate in one, played ${mv.from}${mv.to}`);
-  ok('hard plays the forced mate');
+  const fen = 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4';
+  const samples = 200;
+  const accuracy = {};
+  const variety = {};
+  for (const level of ['easy', 'medium', 'hard']) {
+    let topChoices = 0;
+    const choices = new Set();
+    for (let i = 0; i < samples; i++) {
+      const stats = {};
+      const move = think(fen, level, `personality-${i}`, {
+        maxDepth: 2,
+        timeMs: 100,
+        endgameBonus: 0,
+        stats,
+      });
+      const selected = uci(move);
+      choices.add(selected);
+      if (selected === uci(stats.candidates[0])) topChoices++;
+    }
+    accuracy[level] = topChoices;
+    variety[level] = choices.size;
+  }
+  console.log(`  top choice: casual ${accuracy.easy}/${samples}, club ${accuracy.medium}/${samples}, expert ${accuracy.hard}/${samples}`);
+  assert(accuracy.easy < accuracy.medium && accuracy.medium < accuracy.hard,
+    `move precision did not rise with difficulty: ${JSON.stringify(accuracy)}`);
+  assert(accuracy.hard === samples && variety.hard === 1, 'Expert varied away from the top-scored move');
+  assert(variety.easy > variety.medium && variety.medium > variety.hard,
+    `move variety did not narrow with difficulty: ${JSON.stringify(variety)}`);
+  ok('move precision rises and intentional variance falls across all three levels');
+}
+
+{
+  const move = think('6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1', 'hard', 'mate-check');
+  assert(move.from === 'a1' && move.to === 'a8', `Expert missed mate in one, played ${uci(move)}`);
+  ok('Expert preserves a forced mate');
 }
 
 summary('levels.test.mjs');

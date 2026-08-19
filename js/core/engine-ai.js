@@ -2,9 +2,9 @@
 // quiescence, killer/history move ordering and check extensions, running on the
 // 0x88 board in fastboard.js.
 //
-// The search knows which squares have permanently collapsed, but it is never
-// told the player's active secret black hole. MottyBot can fall into one just
-// like the player can.
+// Active black holes do not alter legal chess moves, and the search is never
+// told the player's secret square. MottyBot can fall into one just like the
+// player can.
 
 import { Chess } from '../vendor/chess.js';
 import {
@@ -309,7 +309,7 @@ function endgameDepthBonus(board) {
 export function think(fen, level, seed, opts = {}) {
   const cfg = { ...(LEVELS[level] || LEVELS.medium), ...opts };
   const rng = makeRng(seedFromString(String(seed ?? 'mottybot')));
-  const board = new FastBoard(fen, opts.holes || []);
+  const board = new FastBoard(fen);
   const rootMoves = board.legalMoves();
   if (!rootMoves.length) return null;
 
@@ -373,13 +373,17 @@ export function think(fen, level, seed, opts = {}) {
     }
   }
 
-  if (cfg.stats) cfg.stats.completedDepth = completedDepth;
+  if (cfg.stats) {
+    cfg.stats.completedDepth = completedDepth;
+    cfg.stats.candidates = scored
+      .filter((entry) => Number.isFinite(entry.score))
+      .map((entry) => ({ ...moveToUci(entry.move), score: entry.score }));
+  }
 
   const picked = moveToUci(chosen.move);
   // Safety net: the authoritative rules engine has the final say. If the fast
   // board and chess.js ever disagree, play something chess.js accepts.
   const referee = new Chess(fen);
-  referee.setHoles(opts.holes || []);
   const legal = referee.moves({ verbose: true });
   if (!legal.some((m) => m.from === picked.from && m.to === picked.to
     && (m.promotion || undefined) === picked.promotion)) {

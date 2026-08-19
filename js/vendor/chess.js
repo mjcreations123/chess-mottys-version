@@ -2222,7 +2222,6 @@ function strippedSan(move) {
 }
 var Chess = class {
   _board = new Array(128);
-  _holes = /* @__PURE__ */ new Set();
   _turn = WHITE;
   _header = {};
   _kings = { w: EMPTY, b: EMPTY };
@@ -2240,7 +2239,6 @@ var Chess = class {
   }
   clear({ preserveHeaders = false } = {}) {
     this._board = new Array(128);
-    this._holes = /* @__PURE__ */ new Set();
     this._kings = { w: EMPTY, b: EMPTY };
     this._turn = WHITE;
     this._castling = { w: 0, b: 0 };
@@ -2449,20 +2447,6 @@ var Chess = class {
   get(square) {
     return this._board[Ox88[square]];
   }
-  setHoles(squares = []) {
-    this._holes = /* @__PURE__ */ new Set();
-    for (const square of squares) {
-      if (typeof square === "number" && !(square & 136)) {
-        this._holes.add(square);
-      } else if (typeof square === "string" && square in Ox88) {
-        this._holes.add(Ox88[square]);
-      }
-    }
-    return this;
-  }
-  holes() {
-    return Array.from(this._holes, algebraic);
-  }
   resetHalfMoves() {
     this._halfMoves = 0;
     return this;
@@ -2608,7 +2592,7 @@ var Chess = class {
         let j = i + offset;
         let blocked = false;
         while (j !== square) {
-          if (this._holes.has(j) || this._board[j] != null) {
+          if (this._board[j] != null) {
             blocked = true;
             break;
           }
@@ -2756,18 +2740,16 @@ var Chess = class {
         if (forPiece && forPiece !== type)
           continue;
         to = from + PAWN_OFFSETS[us][0];
-        if (!this._holes.has(to) && !this._board[to]) {
+        if (!this._board[to]) {
           addMove(moves, us, from, to, PAWN);
           to = from + PAWN_OFFSETS[us][1];
-          if (SECOND_RANK[us] === rank(from) && !this._holes.has(to) && !this._board[to]) {
+          if (SECOND_RANK[us] === rank(from) && !this._board[to]) {
             addMove(moves, us, from, to, PAWN, void 0, BITS.BIG_PAWN);
           }
         }
         for (let j = 2; j < 4; j++) {
           to = from + PAWN_OFFSETS[us][j];
           if (to & 136)
-            continue;
-          if (this._holes.has(to))
             continue;
           if (this._board[to]?.color === them) {
             addMove(moves, us, from, to, PAWN, this._board[to].type, BITS.CAPTURE);
@@ -2784,8 +2766,6 @@ var Chess = class {
           while (true) {
             to += offset;
             if (to & 136)
-              break;
-            if (this._holes.has(to))
               break;
             if (!this._board[to]) {
               addMove(moves, us, from, to, type);
@@ -2806,14 +2786,14 @@ var Chess = class {
         if (this._castling[us] & BITS.KSIDE_CASTLE) {
           const castlingFrom = this._kings[us];
           const castlingTo = castlingFrom + 2;
-          if (!this._holes.has(castlingFrom + 1) && !this._holes.has(castlingTo) && !this._board[castlingFrom + 1] && !this._board[castlingTo] && !this._attacked(them, this._kings[us]) && !this._attacked(them, castlingFrom + 1) && !this._attacked(them, castlingTo)) {
+          if (!this._board[castlingFrom + 1] && !this._board[castlingTo] && !this._attacked(them, this._kings[us]) && !this._attacked(them, castlingFrom + 1) && !this._attacked(them, castlingTo)) {
             addMove(moves, us, this._kings[us], castlingTo, KING, void 0, BITS.KSIDE_CASTLE);
           }
         }
         if (this._castling[us] & BITS.QSIDE_CASTLE) {
           const castlingFrom = this._kings[us];
           const castlingTo = castlingFrom - 2;
-          if (!this._holes.has(castlingFrom - 1) && !this._holes.has(castlingFrom - 2) && !this._holes.has(castlingFrom - 3) && !this._board[castlingFrom - 1] && !this._board[castlingFrom - 2] && !this._board[castlingFrom - 3] && !this._attacked(them, this._kings[us]) && !this._attacked(them, castlingFrom - 1) && !this._attacked(them, castlingTo)) {
+          if (!this._board[castlingFrom - 1] && !this._board[castlingFrom - 2] && !this._board[castlingFrom - 3] && !this._attacked(them, this._kings[us]) && !this._attacked(them, castlingFrom - 1) && !this._attacked(them, castlingTo)) {
             addMove(moves, us, this._kings[us], castlingTo, KING, void 0, BITS.QSIDE_CASTLE);
           }
         }

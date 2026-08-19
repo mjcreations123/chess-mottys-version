@@ -1,8 +1,8 @@
-// v5 replaces teleport chess with Black Hole Chess. Older active games cannot
-// be resumed because their event streams describe a different board topology.
-const ACTIVE_KEY = 'mv-active-v5';
+// v6 makes a triggered square immediately reusable. v5 games described
+// permanent terrain and cannot be resumed under the corrected rule.
+const ACTIVE_KEY = 'mv-active-v6';
 const STATS_KEY = 'mv-stats-v3';
-const RULES_KEY = 'mv-rules-seen-v4';
+const RULES_KEY = 'mv-rules-seen-v5';
 
 const read = (key, fallback) => {
   try {
@@ -15,7 +15,7 @@ const read = (key, fallback) => {
 
 export function loadActive() {
   const data = read(ACTIVE_KEY, null);
-  if (!data || data.version !== 5 || typeof data.seed !== 'string' || !Array.isArray(data.actions)) return null;
+  if (!data || data.version !== 6 || typeof data.seed !== 'string' || !Array.isArray(data.actions)) return null;
   if (!['w', 'b'].includes(data.myColor)) return null;
   if (!['easy', 'medium', 'hard'].includes(data.level)) return null;
   return data;
@@ -24,7 +24,7 @@ export function loadActive() {
 export function saveActive({ seed, actions, myColor, level, startedAt = Date.now() }) {
   try {
     localStorage.setItem(ACTIVE_KEY, JSON.stringify({
-      version: 5,
+      version: 6,
       seed,
       actions,
       myColor,

@@ -1,6 +1,6 @@
-// BoardView: renders the 8x8, pieces, permanent collapsed squares, the
-// player's visible secret black hole, drag + tap input, promotion, and collapse
-// animation. Pure view; the match logic lives in core/black-hole.js.
+// BoardView: renders the 8x8, pieces, the player's visible secret black hole,
+// drag + tap input, promotion, and the one-use trap animation. Pure view; the
+// match logic lives in core/black-hole.js.
 
 import { pieceUse } from './pieces.js';
 
@@ -19,7 +19,7 @@ export class BoardView {
     this.drag = null;
     this.holeSelector = null;
     this.ownBlackHole = null;
-    this.collapsed = new Set();
+    this.spentSquare = null;
     this.busy = false;             // true while an animation runs
     this.focusSq = 'e2';
     this.reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -63,6 +63,7 @@ export class BoardView {
   #buildSquares() {
     let html = '';
     for (let row = 0; row < 8; row++) {
+      html += '<div class="board-row" role="row">';
       for (let col = 0; col < 8; col++) {
         const sq = this.rcToSquare(row, col);
         const light = (row + col) % 2 === 0;
@@ -71,6 +72,7 @@ export class BoardView {
         if (row === 7) html += `<span class="coord coord--file coord--on-${light ? 'light' : 'dark'}">${sq[0]}</span>`;
         html += '</div>';
       }
+      html += '</div>';
     }
     this.el.insertAdjacentHTML('afterbegin', html);
     this.#syncFocus();
@@ -80,7 +82,7 @@ export class BoardView {
     const want = color === 'b';
     if (want === this.flipped) return;
     this.flipped = want;
-    for (const sq of this.el.querySelectorAll('.sq')) sq.remove();
+    for (const row of this.el.querySelectorAll('.board-row')) row.remove();
     this.#buildSquares();
     for (const [sq, elm] of this.pieces) this.#place(elm, sq);
     for (const [, o] of this.overlays) o.remove();
@@ -100,6 +102,7 @@ export class BoardView {
     elm.className = 'piece';
     elm.dataset.color = p.color;
     elm.dataset.type = p.type;
+    elm.setAttribute('aria-hidden', 'true');
     elm.innerHTML = pieceUse(p.color, p.type);
     this.#place(elm, sq);
     this.el.appendChild(elm);
@@ -160,9 +163,10 @@ export class BoardView {
     const cell = this.el.querySelector(`[data-sq="${square}"]`);
     const burst = document.createElement('div');
     burst.className = 'hole-burst';
+    burst.setAttribute('aria-hidden', 'true');
     this.#place(burst, square);
     this.el.appendChild(burst);
-    cell?.classList.add('sq--collapsing');
+    cell?.classList.add('sq--imploding');
 
     if (!this.reduceMotion && piece) {
       const resting = piece.style.transform;
@@ -181,9 +185,13 @@ export class BoardView {
       this.pieces.delete(square);
     }
     burst.remove();
-    cell?.classList.remove('sq--collapsing');
-    this.collapsed.add(square);
+    if (this.ownBlackHole === square) this.ownBlackHole = null;
+    this.spentSquare = square;
     this.#applySquareStates();
+    cell?.classList.remove('sq--imploding');
+    cell?.classList.add('sq--reopening');
+    if (!this.reduceMotion) await wait(240);
+    cell?.classList.remove('sq--reopening');
     try { navigator.vibrate?.([18, 28, 24]); } catch {}
     this.busy = false;
   }
@@ -197,6 +205,7 @@ export class BoardView {
     if (previous) previous.remove();
     const elm = document.createElement('div');
     elm.className = `overlay ${cls}`;
+    elm.setAttribute('aria-hidden', 'true');
     this.#place(elm, sq);
     this.el.appendChild(elm);
     this.overlays.set(key, elm);
@@ -210,17 +219,18 @@ export class BoardView {
     this.#clearOverlays('last:');
     if (from) { this.#overlay(`last:${from}`, from, 'overlay--hl'); this.#overlay(`last:${to}`, to, 'overlay--hl'); }
   }
-  setBlackHoleState({ own = null, collapsed = [] } = {}) {
+  setBlackHoleState({ own = null, spent = null } = {}) {
     this.ownBlackHole = own;
-    this.collapsed = new Set(collapsed);
+    this.spentSquare = spent;
     this.#applySquareStates();
   }
   #applySquareStates() {
     for (const cell of this.el.querySelectorAll('.sq')) {
       const square = cell.dataset.sq;
-      cell.classList.toggle('sq--collapsed', this.collapsed.has(square));
       cell.classList.toggle('sq--own-hole', square === this.ownBlackHole);
       cell.classList.toggle('sq--hole-choice', !!this.holeSelector?.eligible.has(square));
+      cell.classList.toggle('sq--repeat-choice', square === this.holeSelector?.previousSquare);
+      cell.classList.toggle('sq--spent', square === this.spentSquare);
     }
     this.#updateSquareLabels();
   }
@@ -266,16 +276,20 @@ export class BoardView {
     this.#applySquareStates();
   }
 
-  setHoleSelection(squares, onSelect) {
+  setHoleSelection(squares, onSelect, { previousSquare = null } = {}) {
     this.interactiveColor = null;
     this.legalProvider = () => [];
     this.#select(null);
     this.holeSelector = {
       eligible: new Set(squares || []),
       onSelect: onSelect || (() => {}),
+      previousSquare,
     };
     for (const [, elm] of this.pieces) elm.classList.remove('piece--draggable');
-    if (!this.holeSelector.eligible.has(this.focusSq)) {
+    if (previousSquare && this.holeSelector.eligible.has(previousSquare)) {
+      this.focusSq = previousSquare;
+      this.#syncFocus();
+    } else if (!this.holeSelector.eligible.has(this.focusSq)) {
       this.focusSq = this.holeSelector.eligible.values().next().value || this.focusSq;
       this.#syncFocus();
     }
@@ -325,13 +339,14 @@ export class BoardView {
     const names = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
     for (const sq of this.el.querySelectorAll('.sq')) {
       const piece = this.pieces.get(sq.dataset.sq);
-      const collapsed = this.collapsed.has(sq.dataset.sq);
-      const suffix = collapsed ? 'collapsed square, unavailable'
-        : piece ? `${piece.dataset.color === 'w' ? 'white' : 'black'} ${names[piece.dataset.type]}` : 'empty';
+      const suffix = piece ? `${piece.dataset.color === 'w' ? 'white' : 'black'} ${names[piece.dataset.type]}` : 'empty';
       const selected = this.selected === sq.dataset.sq ? ', selected' : '';
       const ownHole = this.ownBlackHole === sq.dataset.sq ? ', your active black hole' : '';
       const choice = this.holeSelector?.eligible.has(sq.dataset.sq) ? ', available for your black hole' : '';
-      sq.setAttribute('aria-label', `${sq.dataset.sq}, ${suffix}${ownHole}${choice}${selected}`);
+      const repeat = this.holeSelector?.previousSquare === sq.dataset.sq
+        ? ', previous black-hole square, available again'
+        : this.spentSquare === sq.dataset.sq ? ', black hole spent, square is open again' : '';
+      sq.setAttribute('aria-label', `${sq.dataset.sq}, ${suffix}${ownHole}${choice}${repeat}${selected}`);
     }
   }
   #activateSquare(sq) {

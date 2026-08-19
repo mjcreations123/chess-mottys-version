@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#15191c">
   <title>Chess (Motty's Version)</title>
-  <meta name="description" content="Black Hole Chess against MottyBot. Hide a one-use trap, erase pieces and permanently remove squares from the board.">
+  <meta name="description" content="Black Hole Chess against MottyBot. Hide a one-use trap, erase the piece that finds it, then arm any empty square again.">
   <meta property="og:title" content="Chess (Motty's Version)">
-  <meta property="og:description" content="You and MottyBot each hide a one-use black hole. Find theirs with a piece and that piece, plus the square, is gone.">
+  <meta property="og:description" content="You and MottyBot each hide a one-use black hole. A trapped piece vanishes, the square reopens and its owner secretly arms another.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://chess-mottys-version.vercel.app/">
   <meta property="og:image" content="https://chess-mottys-version.vercel.app/og-card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="A chessboard with one square collapsed into a black hole beside the words One square is lying to you.">
+  <meta property="og:image:alt" content="A chessboard with a hidden black hole beside the words One square is lying to you and The piece vanishes. The square comes back.">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="canonical" href="https://chess-mottys-version.vercel.app/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -33,15 +33,15 @@
       <span>Chess <b>(Motty's Version)</b></span>
     </a>
     <nav class="topbar__actions" aria-label="Game controls">
-      <button class="top-action" id="nav-new" type="button">
+      <button class="top-action" id="nav-new" type="button" aria-label="New game">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>New game</span>
       </button>
-      <button class="top-action" id="nav-rules" type="button">
+      <button class="top-action" id="nav-rules" type="button" aria-label="Rules">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h9a3 3 0 0 1 3 3v12H9a3 3 0 0 1-3-3v-12Zm3 0v15"/></svg>
         <span>Rules</span>
       </button>
-      <button class="top-action" id="nav-sound" type="button" aria-pressed="true">
+      <button class="top-action" id="nav-sound" type="button" aria-label="Sound on" aria-pressed="true">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h4l5 4V5L9 9H5Z"/><path class="sound-waves" d="M17 9a4 4 0 0 1 0 6M19.5 6.5a8 8 0 0 1 0 11"/></svg>
         <span id="nav-sound-label">Sound on</span>
       </button>
@@ -56,7 +56,7 @@
           <strong id="top-name">MottyBot</strong>
           <span id="top-detail">Club difficulty</span>
         </div>
-        <div class="captured" id="top-captured" aria-label="Pieces captured by MottyBot"></div>
+        <div class="captured" id="top-captured" role="group" aria-label="Pieces captured by MottyBot"></div>
         <div class="think-state" id="top-thinking" hidden>MottyBot is thinking</div>
       </div>
 
@@ -71,7 +71,7 @@
           <strong id="bottom-name">You</strong>
           <span id="bottom-detail">White</span>
         </div>
-        <div class="captured" id="bottom-captured" aria-label="Pieces captured by you"></div>
+        <div class="captured" id="bottom-captured" role="group" aria-label="Pieces captured by you"></div>
         <div class="turn-state" id="turn-tag" hidden>Your move</div>
       </div>
 
@@ -88,7 +88,7 @@
         </svg>
         <div class="magic-strip__copy">
           <strong id="magic-title">Choose your secret square</strong>
-          <span id="magic-copy">Your black hole works once. Its square disappears when triggered.</span>
+          <span id="magic-copy">Your black hole works once. The square reopens when it is triggered.</span>
         </div>
         <div class="magic-strip__route" id="magic-route" hidden></div>
       </div>

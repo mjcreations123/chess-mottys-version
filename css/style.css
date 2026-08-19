@@ -30,7 +30,7 @@ body {
   --line-strong: #485057;
   --text: #f3f1eb;
   --muted: #a9afb3;
-  --quiet: #7f878c;
+  --quiet: #969da2;
   --magic: #ff7358;
   --magic-light: #ff9a85;
   --turn: #e4b75d;
@@ -146,25 +146,41 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .board:focus-visible { box-shadow: 0 0 0 3px var(--focus), 0 18px 48px rgba(0,0,0,.34); }
 .sq { position: absolute; width: 12.5%; height: 12.5%; }
+.board-row { display: contents; }
 .sq--light { background: var(--sq-light); }
 .sq--dark { background: var(--sq-dark); }
 .sq--hole-choice {
   cursor: crosshair;
-  box-shadow: inset 0 0 0 2px rgba(255, 115, 88, .52);
 }
 .sq--hole-choice::after {
   content: "";
   position: absolute;
-  width: 18%;
+  width: 14%;
   aspect-ratio: 1;
-  left: 41%;
-  top: 41%;
+  left: 43%;
+  top: 43%;
   border-radius: 50%;
-  background: #341a18;
+  background: var(--void);
   border: 2px solid var(--magic-light);
+  box-shadow: 0 0 0 2px rgba(16, 19, 21, .2);
 }
 .sq--hole-choice:hover { box-shadow: inset 0 0 0 4px var(--magic); }
+.sq--repeat-choice {
+  z-index: 3;
+  box-shadow: inset 0 0 0 4px #f2d178;
+}
+.sq--repeat-choice::after {
+  width: 34%;
+  left: 33%;
+  top: 33%;
+  background: transparent;
+  border: 3px solid #f8e5a8;
+  box-shadow: 0 0 0 4px rgba(16, 19, 21, .32);
+  animation: repeat-choice 760ms ease-in-out infinite alternate;
+}
+@keyframes repeat-choice { to { transform: scale(.82); opacity: .72; } }
 .sq--own-hole {
+  z-index: 3;
   box-shadow: inset 0 0 0 clamp(3px, .55vw, 6px) rgba(255, 115, 88, .88);
 }
 .sq--own-hole::before {
@@ -178,21 +194,18 @@ button, a { -webkit-tap-highlight-color: transparent; }
   background: var(--void);
   box-shadow: 0 0 0 4px rgba(255, 115, 88, .18);
 }
-.sq--collapsed {
-  z-index: 1;
-  background: var(--void) !important;
-  box-shadow: inset 0 0 0 2px #31383d, inset 0 0 22px #000;
+.sq--spent {
+  box-shadow: inset 0 0 0 3px rgba(242, 209, 120, .9);
 }
-.sq--collapsed::before {
+.sq--spent::before {
   content: "";
   position: absolute;
-  inset: 11%;
-  border: 1px solid #596168;
+  inset: 22%;
+  border: 2px dashed rgba(16, 19, 21, .7);
   border-radius: 50%;
-  box-shadow: inset 0 0 0 7px #0d1012;
 }
-.sq--collapsed .coord { color: #92999e; }
-.sq--collapsing { animation: square-collapse .52s ease-in forwards; }
+.sq--imploding { animation: square-implode .52s ease-in forwards; }
+.sq--reopening { animation: square-reopen .24s ease-out; }
 .board:focus-visible .sq[data-focus] { box-shadow: inset 0 0 0 4px var(--focus); z-index: 3; }
 .coord {
   position: absolute;
@@ -256,7 +269,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
   42% { opacity: 1; scale: .78; }
   100% { opacity: .72; scale: .98; box-shadow: inset 0 0 0 38px rgba(4, 6, 7, .96), 0 0 0 rgba(255, 115, 88, 0); }
 }
-@keyframes square-collapse { to { background: var(--void); } }
+@keyframes square-implode { to { background: var(--void); box-shadow: inset 0 0 22px #000; } }
+@keyframes square-reopen {
+  from { box-shadow: inset 0 0 0 5px #f2d178, inset 0 0 24px rgba(242, 209, 120, .55); }
+  to { box-shadow: none; }
+}
 
 .playerbar {
   min-height: 48px;
@@ -311,8 +328,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .magic-strip[data-phase="selecting"] { border-left-color: var(--turn); }
 .magic-strip[data-phase="selecting"] .magic-strip__icon { color: var(--turn); animation: choose .8s ease-in-out infinite alternate; }
-.magic-strip[data-phase="collapse"] { border-left-color: var(--danger); }
-.magic-strip[data-phase="collapse"] .magic-strip__icon { color: var(--danger); }
+.magic-strip[data-phase="triggered"] { border-left-color: var(--danger); }
+.magic-strip[data-phase="triggered"] .magic-strip__icon { color: var(--danger); }
 @keyframes choose { to { transform: scale(.82); opacity: .66; } }
 .magic-strip__icon { width: 26px; height: 26px; color: var(--magic); fill: none; stroke: currentColor; stroke-width: 1.7; }
 .magic-strip__copy { min-width: 0; }
@@ -695,9 +712,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 @media (forced-colors: active) {
+  .board:focus { outline: 3px solid Highlight; outline-offset: 2px; }
   .sq--own-hole { outline: 4px solid Highlight; outline-offset: -5px; }
-  .sq--collapsed { outline: 3px solid GrayText; outline-offset: -4px; }
   .sq--hole-choice { outline: 2px dashed Highlight; outline-offset: -4px; }
+  .sq--repeat-choice, .sq--spent { outline: 4px double Highlight; outline-offset: -6px; }
 }
 
 /* MottyBot's trash talk. Sits below the board in normal flow, never over the

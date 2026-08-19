@@ -4,9 +4,8 @@ import { assert, ok, summary } from './helpers.mjs';
 function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   const match = new BlackHoleMatch(seed);
   match.chess.load(fen);
-  match.chess.setHoles([]);
   match.selectBlackHole('w', whiteHole);
-  match.selectBlackHole('b', blackHole);
+  match.selectBlackHole('b', blackHole, { automatic: true });
   return match;
 }
 
@@ -18,7 +17,7 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   try { match.selectBlackHole('w', 'e2'); } catch { rejected = true; }
   assert(rejected, 'an occupied square was accepted as a black hole');
   match.selectBlackHole('w', 'e4');
-  match.selectBlackHole('b', 'd4');
+  match.selectBlackHole('b', 'd4', { automatic: true });
   assert(match.readyToPlay(), 'match did not become ready after both choices');
   ok('setup requires one empty secret square per player');
 }
@@ -37,20 +36,23 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
 }
 
 {
-  const match = at(
-    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-    'd4', 'e4', 'trigger',
-  );
-  match.applyMove({ from: 'e2', to: 'e4' });
+  const match = at('k3r3/8/8/8/4P3/8/8/4K3 w - - 37 1', 'a4', 'e5', 'reopen');
+  match.applyMove({ from: 'e4', to: 'e5' });
   const [event] = match.resolveBlackHoleIfDue();
-  assert(event.owner === 'b' && event.square === 'e4', 'wrong black hole triggered');
-  assert(!match.chess.get('e4'), 'landing piece survived the black hole');
-  assert(match.collapsed.has('e4'), 'triggered square did not collapse');
+  assert(event.owner === 'b' && event.square === 'e5' && event.reopened, 'wrong black hole triggered');
+  assert(!match.chess.get('e5'), 'landing piece survived the black hole');
+  assert(match.fen().split(' ')[4] === '0', 'a black-hole loss did not reset the fifty-move clock');
   assert(match.activeBlackHole('b') === null && match.selectionRequired('b'), 'spent black hole was not retired');
+  assert(match.eligibleBlackHoles('b').includes('e5'), 'the spent square was not immediately eligible again');
   assert(match.legalMoves().length === 0, 'play continued before the replacement was selected');
-  match.selectBlackHole('b', 'e5');
-  assert(match.readyToPlay(), 'replacement did not resume play');
-  ok('an opponent landing consumes the piece, square and one-use trap');
+  match.selectBlackHole('b', 'e5', { automatic: true });
+  assert(match.activeBlackHole('b') === 'e5', 'the same square could not be armed again');
+  const rookRoute = match.legalMoves('e8').find((move) => move.to === 'e5');
+  assert(rookRoute, 'an owner piece could not use the reopened square normally');
+  match.applyMove({ from: 'e8', to: 'e5' });
+  assert(match.resolveBlackHoleIfDue().length === 0, 'an owner piece triggered its rearmed black hole');
+  assert(match.chess.get('e5')?.type === 'r', 'the reopened square did not behave like an ordinary square');
+  ok('a spent square reopens immediately and may be armed again');
 }
 
 {
@@ -79,17 +81,17 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   match.applyMove({ from: 'e1', to: 'g1' });
   const [event] = match.resolveBlackHoleIfDue();
   assert(event.role === 'castling rook' && event.piece.type === 'r', 'castling rook did not trigger its landing square');
-  assert(match.chess.get('g1')?.type === 'k' && !match.chess.get('f1'), 'castling collapse removed the wrong piece');
+  assert(match.chess.get('g1')?.type === 'k' && !match.chess.get('f1'), 'the trap removed the wrong castling piece');
   ok('a castling rook can fall into a black hole');
 }
 
 {
   const match = new BlackHoleMatch('collision');
-  match.selectBlackHole('b', 'd4');
+  match.selectBlackHole('b', 'd4', { automatic: true });
   const placement = match.selectBlackHole('w', 'd4');
   assert(placement.displaced === 'b', 'secret-square collision was not reconciled');
   assert(match.activeBlackHole('w') === 'd4' && match.selectionRequired('b'), 'latest secret did not keep the colliding square');
-  const replacement = match.selectRandomBlackHole('b');
+  const replacement = match.selectFallbackBlackHole('b', ['d4']);
   assert(replacement.square !== 'd4', 'displaced bot selected the player\'s active square again');
   ok('colliding secret choices stay hidden and preserve one active trap each');
 }
@@ -99,10 +101,10 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   const b = new BlackHoleMatch('same-seed');
   a.selectBlackHole('w', 'd4');
   b.selectBlackHole('w', 'd4');
-  const ah = a.selectRandomBlackHole('b');
-  const bh = b.selectRandomBlackHole('b');
-  assert(ah.square === bh.square, 'same seed produced different MottyBot holes');
-  ok('MottyBot black-hole selection is deterministic per seed and sequence');
+  const ah = a.selectFallbackBlackHole('b', ['d4']);
+  const bh = b.selectFallbackBlackHole('b', ['d4']);
+  assert(ah.square === bh.square, 'same seed produced different fallback holes');
+  ok('emergency black-hole placement is deterministic');
 }
 
 {
@@ -112,13 +114,14 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   );
   original.applyMove({ from: 'e2', to: 'e4' });
   original.resolveBlackHoleIfDue();
-  original.selectBlackHole('b', 'e5');
+  original.selectBlackHole('b', 'e4', { automatic: true });
   const restored = replayMatch(original.seed, original.serializedActions());
   assert(restored.fen() === original.fen(), `replay FEN drifted\n${restored.fen()}\n${original.fen()}`);
-  assert(JSON.stringify(restored.collapsedSquares()) === JSON.stringify(original.collapsedSquares()), 'replay lost collapsed squares');
+  assert(restored.blackHolesTriggered() === 1 && restored.lastTriggeredSquare('b') === 'e4', 'replay lost trigger history');
   assert(restored.activeBlackHole('w') === original.activeBlackHole('w')
     && restored.activeBlackHole('b') === original.activeBlackHole('b'), 'replay lost active black holes');
-  ok('saved actions reproduce pieces, active traps and collapsed terrain');
+  assert(restored.log.findLast((event) => event.kind === 'placement')?.automatic, 'replay lost automatic placement ownership');
+  ok('saved actions reproduce pieces, active traps and a same-square rearm');
 }
 
 summary('black-hole.test.mjs');

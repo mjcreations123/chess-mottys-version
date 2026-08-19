@@ -1,7 +1,7 @@
-// Black Hole Chess: both players keep one secret trap on the board. When an
-// opposing piece lands on it, that piece disappears, the square collapses for
-// the rest of the game, and the trap's owner must choose a replacement before
-// play continues.
+// Black Hole Chess: both players keep one secret one-use trap on the board.
+// When an opposing piece lands on it, that piece disappears. The trap is then
+// spent, its square is immediately ordinary again, and the owner chooses a new
+// empty square before the next chess move.
 
 import { Chess } from '../vendor/chess.js';
 import { SQUARES } from './fen.js';
@@ -11,8 +11,8 @@ export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0
 
 const otherColor = (color) => color === 'w' ? 'b' : 'w';
 
-export function eligibleBlackHoleSquares(chess, collapsed = [], excluded = []) {
-  const blocked = new Set([...collapsed, ...excluded].filter(Boolean));
+export function eligibleBlackHoleSquares(chess, excluded = []) {
+  const blocked = new Set(excluded.filter(Boolean));
   return SQUARES.filter((square) => !blocked.has(square) && !chess.get(square));
 }
 
@@ -25,25 +25,28 @@ export class BlackHoleMatch {
     this.resignedBy = null;
     this.startedAt = Date.now();
     this.blackHoles = { w: null, b: null };
-    this.collapsed = new Set();
     this.selectionCount = { w: 0, b: 0 };
+    this.triggeredCount = { w: 0, b: 0 };
+    this.lastTriggered = { w: null, b: null };
     this.requiredSelections = new Set(['w', 'b']);
     this.resolutionPending = false;
     this.pendingTrigger = null;
     this.blackHoleWin = null;
-    this.chess.setHoles([]);
   }
 
   turn() { return this.chess.turn(); }
   fen() { return this.chess.fen(); }
-  collapsedSquares() { return [...this.collapsed]; }
   activeBlackHole(color) { return this.blackHoles[color] || null; }
   selectionRequired(color) { return this.requiredSelections.has(color); }
   readyToPlay() { return this.requiredSelections.size === 0; }
+  lastTriggeredSquare(color) { return this.lastTriggered[color] || null; }
+  blackHolesTriggered(color) {
+    return color ? (this.triggeredCount[color] || 0) : this.triggeredCount.w + this.triggeredCount.b;
+  }
 
   eligibleBlackHoles(color) {
     if (!['w', 'b'].includes(color)) return [];
-    return eligibleBlackHoleSquares(this.chess, this.collapsed);
+    return eligibleBlackHoleSquares(this.chess);
   }
 
   selectBlackHole(color, square, { automatic = false } = {}) {
@@ -77,17 +80,19 @@ export class BlackHoleMatch {
       sequence,
       automatic,
       displaced,
+      previousSquare: this.lastTriggered[color],
       fenAfter: this.fen(),
-      collapsed: this.collapsedSquares(),
     };
     this.log.push(event);
     return event;
   }
 
-  selectRandomBlackHole(color) {
+  // Deterministic last-resort placement for recovery paths and fuzz tests.
+  // The public game uses the difficulty-aware strategist in hole-strategy.js.
+  selectFallbackBlackHole(color, excluded = []) {
     const opponent = otherColor(color);
-    const excluded = this.blackHoles[opponent] ? [this.blackHoles[opponent]] : [];
-    const choices = eligibleBlackHoleSquares(this.chess, this.collapsed, excluded);
+    const blocked = [...excluded, this.blackHoles[opponent]].filter(Boolean);
+    const choices = eligibleBlackHoleSquares(this.chess, blocked);
     if (!choices.length) {
       this.requiredSelections.delete(color);
       return null;
@@ -137,7 +142,6 @@ export class BlackHoleMatch {
     if (this.status().over) throw new Error('game is over');
 
     const fenBefore = this.fen();
-    const holesBefore = this.collapsedSquares();
     const move = this.chess.move({ from, to, promotion: promotion || undefined });
     const opponent = otherColor(move.color);
     const active = this.blackHoles[opponent];
@@ -176,7 +180,6 @@ export class BlackHoleMatch {
       promotion: move.promotion || null,
       fenBefore,
       fenAfter: this.fen(),
-      collapsed: holesBefore,
     };
     this.log.push(entry);
     this.ply++;
@@ -186,7 +189,7 @@ export class BlackHoleMatch {
   }
 
   // Settle the trap check owed by the move just played. Returns null when no
-  // move is awaiting settlement, [] when the move was safe, or one collapse.
+  // move is awaiting settlement, [] when the move was safe, or one trigger.
   resolveBlackHoleIfDue() {
     if (!this.resolutionPending) return null;
     this.resolutionPending = false;
@@ -200,8 +203,8 @@ export class BlackHoleMatch {
     this.chess.resetHalfMoves();
 
     this.blackHoles[trigger.owner] = null;
-    this.collapsed.add(trigger.square);
-    this.chess.setHoles(this.collapsed);
+    this.lastTriggered[trigger.owner] = trigger.square;
+    this.triggeredCount[trigger.owner]++;
 
     const victimColor = trigger.piece.color;
     if (trigger.piece.type === 'k') {
@@ -236,7 +239,7 @@ export class BlackHoleMatch {
       role: trigger.role,
       fenBefore,
       fenAfter: this.fen(),
-      collapsed: this.collapsedSquares(),
+      reopened: true,
       kingLost: trigger.piece.type === 'k',
     };
     this.log.push(event);
@@ -263,7 +266,9 @@ export class BlackHoleMatch {
 
   serializedActions() {
     return this.log.flatMap((event) => {
-      if (event.kind === 'placement') return [{ kind: 'place', color: event.color, square: event.square }];
+      if (event.kind === 'placement') {
+        return [{ kind: 'place', color: event.color, square: event.square, automatic: event.automatic }];
+      }
       if (event.kind === 'move') return [{ kind: 'move', uci: event.uci }];
       if (event.kind === 'resign') return [{ kind: 'resign', color: event.color }];
       return [];
@@ -275,7 +280,7 @@ export function replayMatch(seed, actions) {
   const match = new BlackHoleMatch(seed);
   for (const action of actions) {
     if (action?.kind === 'place') {
-      match.selectBlackHole(action.color, action.square, { automatic: action.color !== 'w' });
+      match.selectBlackHole(action.color, action.square, { automatic: Boolean(action.automatic) });
     } else if (action?.kind === 'move' && typeof action.uci === 'string') {
       match.applyMove({
         from: action.uci.slice(0, 2),
