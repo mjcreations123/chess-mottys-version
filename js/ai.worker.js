@@ -3,10 +3,10 @@ import { think } from './core/engine-ai.js';
 import { planStrategicBlackHole } from './core/hole-strategy.js';
 
 self.onmessage = (e) => {
-  const { id, kind = 'move', fen, level, seed, botColor } = e.data;
+  const { id, kind = 'move', fen, level, seed, botColor, firstPick } = e.data;
   try {
     if (kind === 'hole') {
-      const strategy = planStrategicBlackHole(fen, botColor, level, seed);
+      const strategy = planStrategicBlackHole(fen, botColor, level, seed, { firstPick });
       self.postMessage({ id, strategy });
       return;
     }

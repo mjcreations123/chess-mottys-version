@@ -132,4 +132,33 @@ const QUICK = { strategy: { replyDepth: 2, replyTimeMs: 45 } };
   ok('expert traps material rather than sniping the king');
 }
 
+// The engine's own eligibility filter would reject a first-pick candidate
+// beside a king or in front of the bot's own pawns, falling back to a random
+// square. The strategist needs to already know about both blind spots itself,
+// so its top choice never gets discarded by that safety net.
+{
+  const plan = planStrategicBlackHole(START, 'b', 'hard', 'first-pick-guard', {
+    strategy: { replyDepth: 2, replyTimeMs: 40 },
+    firstPick: true,
+  });
+  const forbidden = ['a6', 'b6', 'c6', 'd6', 'e6', 'f6', 'g6', 'h6', 'd8', 'd7', 'e7', 'f8', 'f7', 'd1', 'd2', 'e2', 'f1', 'f2'];
+  for (const square of forbidden) {
+    assert(!plan.candidates.some((entry) => entry.square === square),
+      `firstPick candidates included ${square}, which the engine would reject as a first pick`);
+  }
+  ok('the strategist itself avoids the first-pick blind spots, not just the engine\'s fallback filter');
+}
+
+// A trap now catches its own owner too, so a square MottyBot is about to
+// move its own piece onto is a guaranteed, avoidable self-goal the moment it
+// re-arms there. It must never be a candidate.
+{
+  const fen = '6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1';
+  const plan = planStrategicBlackHole(fen, 'w', 'hard', 'self-goal-guard');
+  assert(plan.plannedMove?.to === 'a8', `fixture drifted, expected the mating move to land on a8: ${JSON.stringify(plan.plannedMove)}`);
+  assert(!plan.candidates.some((entry) => entry.square === 'a8'),
+    'MottyBot considered trapping the exact square its own planned move is about to land on');
+  ok('MottyBot never plants its trap where its own planned move is about to land');
+}
+
 summary('hole-strategy.test.mjs');

@@ -25,14 +25,49 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
 {
   const match = at(
     'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-    'e4', 'd4', 'own-safe',
+    'e4', 'd4', 'self-catch',
+  );
+  match.applyMove({ from: 'e2', to: 'e4' });
+  const [event] = match.resolveBlackHoleIfDue();
+  assert(event.owner === 'w' && event.victimColor === 'w', 'a piece landing on its own owner\'s trap was not caught');
+  assert(!match.chess.get('e4'), 'a piece survived landing on its own owner\'s black hole');
+  assert(match.activeBlackHole('w') === null && match.selectionRequired('w'),
+    'the owner\'s spent trap did not require a re-arm');
+  ok('a black hole catches its own owner\'s pieces too, not just the opponent\'s');
+}
+
+{
+  const match = at(
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    'e4', 'e4', 'shared-self-catch',
   );
   match.applyMove({ from: 'e2', to: 'e4' });
   const events = match.resolveBlackHoleIfDue();
-  assert(events.length === 0, 'a player triggered their own black hole');
-  assert(match.chess.get('e4')?.type === 'p', 'piece did not survive on its owner\'s black hole');
-  assert(match.activeBlackHole('w') === 'e4', 'own black hole was consumed');
-  ok('a black hole affects only the opponent');
+  assert(events.length === 2, 'a square shared by both secret traps did not fire for both owners');
+  assert(!match.chess.get('e4'), 'the piece survived a doubly-trapped square');
+  assert(match.selectionRequired('w') && match.selectionRequired('b'),
+    'a shared trigger did not require both owners to re-arm');
+  ok('a square shared by both secret traps consumes both when anything lands there');
+}
+
+{
+  const match = at('4k3/8/8/8/8/8/8/4K3 w - - 0 1', 'e4', 'a4', 'self-king-fall');
+  match.applyMove({ from: 'e1', to: 'e2' });
+  assert(match.resolveBlackHoleIfDue().length === 0, 'an empty step triggered a black hole');
+  match.applyMove({ from: 'e8', to: 'd8' });
+  match.resolveBlackHoleIfDue();
+  match.applyMove({ from: 'e2', to: 'e3' });
+  assert(match.resolveBlackHoleIfDue().length === 0, 'an empty step triggered a black hole');
+  match.applyMove({ from: 'd8', to: 'c8' });
+  match.resolveBlackHoleIfDue();
+  match.applyMove({ from: 'e3', to: 'e4' });
+  const [event] = match.resolveBlackHoleIfDue();
+  const status = match.status();
+  assert(event.kingLost && event.owner === 'w' && event.victimColor === 'w',
+    'a king landing on its own owner\'s trap was not recognised');
+  assert(status.over && status.winner === 'b',
+    'a king that falls into its own trap should hand the win to the other side, not its own');
+  ok('a king that blunders into its own black hole loses for its own side');
 }
 
 {
@@ -45,15 +80,16 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   assert(match.activeBlackHole('b') === null && match.selectionRequired('b'), 'spent black hole was not retired');
   assert(match.eligibleBlackHoles('b').includes('e5'), 'the spent square was not immediately eligible again');
   assert(match.legalMoves().length === 0, 'play continued before the replacement was selected');
-  match.selectBlackHole('b', 'e5', { automatic: true });
-  assert(match.activeBlackHole('b') === 'e5', 'the same square could not be armed again');
+  // Re-arm somewhere else so the rook's move below lands on ordinary ground
+  // rather than walking straight back into a live trap of its own.
+  match.selectBlackHole('b', 'a5', { automatic: true });
   assert(match.relocationsRemaining('b') === 3, 'mandatory re-arming consumed a voluntary relocation');
   const rookRoute = match.legalMoves('e8').find((move) => move.to === 'e5');
-  assert(rookRoute, 'an owner piece could not use the reopened square normally');
+  assert(rookRoute, 'a piece could not use the reopened square normally');
   match.applyMove({ from: 'e8', to: 'e5' });
-  assert(match.resolveBlackHoleIfDue().length === 0, 'an owner piece triggered its rearmed black hole');
+  assert(match.resolveBlackHoleIfDue().length === 0, 'the reopened square still behaved like a live trap');
   assert(match.chess.get('e5')?.type === 'r', 'the reopened square did not behave like an ordinary square');
-  ok('a spent square reopens immediately and may be armed again');
+  ok('a spent square reopens immediately and may be armed again, this time elsewhere');
 }
 
 {
@@ -133,22 +169,42 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
 }
 
 {
-  const match = at('4k3/8/8/8/8/8/8/4K3 w - - 0 1', 'a4', 'e2', 'king-fall');
+  // e2 sits beside White's own king (e1) and could never be a legal first
+  // pick any more; the king still has to be able to walk into a trap set
+  // several squares away, which is what actually matters here.
+  const match = at('4k3/8/8/8/8/8/8/4K3 w - - 0 1', 'a4', 'e4', 'king-fall');
   match.applyMove({ from: 'e1', to: 'e2' });
+  assert(match.resolveBlackHoleIfDue().length === 0, 'an empty step triggered a black hole');
+  match.applyMove({ from: 'e8', to: 'd8' });
+  match.resolveBlackHoleIfDue();
+  match.applyMove({ from: 'e2', to: 'e3' });
+  assert(match.resolveBlackHoleIfDue().length === 0, 'an empty step triggered a black hole');
+  match.applyMove({ from: 'd8', to: 'c8' });
+  match.resolveBlackHoleIfDue();
+  match.applyMove({ from: 'e3', to: 'e4' });
   const [event] = match.resolveBlackHoleIfDue();
   const status = match.status();
   assert(event.kingLost, 'king fall was not identified');
   assert(status.over && status.winner === 'b' && status.blackHole.cause === 'king-fell', 'king fall did not end the game for the trap owner');
-  ok('a king that lands on a black hole loses immediately');
+  ok('a king that lands on a black hole loses immediately, even several squares from where the trap was set');
 }
 
 {
-  const match = at('4k3/8/8/8/8/8/8/4K2R w K - 0 1', 'a4', 'f1', 'castle');
+  // f1 sits beside White's uncastled king (e1), so Black's very first pick
+  // could never land there. Relocating once the position has moved on is
+  // how the castling-rook mechanic is meant to be reached now.
+  const match = at('4k3/8/8/8/8/8/4P3/4K2R w K - 0 1', 'a4', 'h4', 'castle');
+  assert(match.eligibleRelocationSquares('b').includes('f1'),
+    'relocation should be able to reach a square beside a king even though a first pick cannot');
+  match.applyMove({ from: 'e2', to: 'e3' });
+  assert(match.resolveBlackHoleIfDue().length === 0, 'a quiet pawn move triggered a black hole');
+  const relocation = match.relocateBlackHole('b', 'f1');
+  assert(relocation.to === 'f1', 'relocation onto the castling square failed');
   match.applyMove({ from: 'e1', to: 'g1' });
   const [event] = match.resolveBlackHoleIfDue();
   assert(event.role === 'castling rook' && event.piece.type === 'r', 'castling rook did not trigger its landing square');
   assert(match.chess.get('g1')?.type === 'k' && !match.chess.get('f1'), 'the trap removed the wrong castling piece');
-  ok('a castling rook can fall into a black hole');
+  ok('a castling rook can fall into a black hole placed there after the opening');
 }
 
 {
@@ -163,35 +219,83 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
 }
 
 {
-  const match = at('4k3/8/8/8/4P3/8/8/4K3 w - - 0 1', 'd5', 'd5', 'single-rearm');
+  const match = at('4k3/8/8/8/4P3/8/8/4K3 w - - 0 1', 'a4', 'd5', 'single-rearm');
   match.chess.put({ type: 'p', color: 'b' }, 'd5');
   match.applyMove({ from: 'e4', to: 'd5' });
   const [event] = match.resolveBlackHoleIfDue();
   assert(event.owner === 'b' && event.victimColor === 'w', 'the opponent-owned trap did not catch the moving piece');
-  assert(match.activeBlackHole('w') === 'd5' && match.activeBlackHole('b') === null,
-    'the safe owner trap was consumed with the triggered trap');
+  assert(match.activeBlackHole('w') === 'a4' && match.activeBlackHole('b') === null,
+    'an unrelated owner trap was disturbed by a capture on a different square');
   assert(!match.selectionRequired('w') && match.selectionRequired('b'),
     'both players were asked to re-arm after one piece fell');
   match.selectBlackHole('b', 'd5', { automatic: true });
-  assert(match.readyToPlay() && match.activeBlackHole('w') === 'd5' && match.activeBlackHole('b') === 'd5',
+  assert(match.readyToPlay() && match.activeBlackHole('w') === 'a4' && match.activeBlackHole('b') === 'd5',
     'the single required re-arm did not restore play');
-  ok('one fall consumes one opponent trap and requires exactly one owner to re-arm');
+  ok('one fall consumes one trap and requires exactly one owner to re-arm when the traps do not coincide');
 }
 
 {
-  const match = at('4k3/8/8/8/3p4/8/8/4K3 b - - 0 1', 'e3', 'e3', 'single-rearm-reverse');
+  // e3 is White's own third rank, off limits for a first pick; relocating
+  // there once the position has moved on is how this scenario is reached.
+  const match = at('4k3/8/8/8/3p4/8/8/4K3 b - - 0 1', 'a4', 'h5', 'single-rearm-reverse');
+  match.applyMove({ from: 'e8', to: 'd8' });
+  match.resolveBlackHoleIfDue();
+  match.relocateBlackHole('w', 'e3');
   match.chess.put({ type: 'p', color: 'w' }, 'e3');
   match.applyMove({ from: 'd4', to: 'e3' });
   const [event] = match.resolveBlackHoleIfDue();
   assert(event.owner === 'w' && event.victimColor === 'b', 'the player-owned trap did not catch MottyBot');
-  assert(match.activeBlackHole('b') === 'e3' && match.activeBlackHole('w') === null,
-    'MottyBot\'s safe trap was consumed with the player trap');
+  assert(match.activeBlackHole('b') === 'h5' && match.activeBlackHole('w') === null,
+    'an unrelated owner trap was disturbed by a capture on a different square');
   assert(match.selectionRequired('w') && !match.selectionRequired('b'),
     'MottyBot was asked to re-arm when its own piece fell');
   match.selectBlackHole('w', 'e3');
-  assert(match.readyToPlay() && match.activeBlackHole('w') === 'e3' && match.activeBlackHole('b') === 'e3',
+  assert(match.readyToPlay() && match.activeBlackHole('w') === 'e3' && match.activeBlackHole('b') === 'h5',
     'the player\'s single re-arm did not restore play');
-  ok('the one-owner re-arm rule is symmetric when MottyBot falls');
+  ok('the one-owner re-arm rule is symmetric when MottyBot falls, when the traps do not coincide');
+}
+
+{
+  const match = new BlackHoleMatch('king-proximity');
+  match.chess.load('4k3/8/8/8/8/8/8/4K3 w - - 0 1');
+  const eligible = match.eligibleBlackHoles('w');
+  for (const near of ['d1', 'd2', 'e2', 'f1', 'f2', 'd8', 'd7', 'e7', 'f8', 'f7']) {
+    assert(!eligible.includes(near), `${near} sits beside a king and should not be an eligible first pick`);
+  }
+  assert(eligible.includes('a4'), 'a square nowhere near either king was wrongly excluded');
+  let rejected = false;
+  try { match.selectBlackHole('w', 'e2'); } catch { rejected = true; }
+  assert(rejected, 'a first pick beside a king was accepted');
+  ok('the first black hole cannot be planted beside either king');
+}
+
+{
+  const match = new BlackHoleMatch('third-rank');
+  match.chess.load('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  const whiteFirst = match.eligibleBlackHoles('w');
+  for (const sq of ['a3', 'b3', 'c3', 'd3', 'e3', 'f3', 'g3', 'h3']) {
+    assert(!whiteFirst.includes(sq), `White's own first pick allowed ${sq}, in front of its own pawns`);
+  }
+  let rejected = false;
+  try { match.selectBlackHole('w', 'c3'); } catch { rejected = true; }
+  assert(rejected, 'White\'s very first black hole was allowed onto its own third rank');
+  match.selectBlackHole('w', 'd4');
+
+  const blackFirst = match.eligibleBlackHoles('b');
+  for (const sq of ['a6', 'b6', 'c6', 'd6', 'e6', 'f6', 'g6', 'h6']) {
+    assert(!blackFirst.includes(sq), `Black's own first pick allowed ${sq}, in front of its own pawns`);
+  }
+  assert(blackFirst.includes('d3'), 'the restriction leaked onto a rank nobody asked for');
+  ok('the first black hole cannot be planted in front of its own owner\'s pawns');
+}
+
+{
+  const match = at('k3r3/8/8/8/4P3/8/8/4K3 w - - 37 1', 'a4', 'e5', 'third-rank-rearm');
+  match.applyMove({ from: 'e4', to: 'e5' });
+  match.resolveBlackHoleIfDue();
+  const rearmChoices = match.eligibleBlackHoles('b');
+  assert(rearmChoices.includes('e6'), 'the re-arm pick was still blocked from the rank in front of Black\'s own pawns');
+  ok('the rank-in-front-of-your-own-pawns limit applies only to the very first black hole');
 }
 
 {

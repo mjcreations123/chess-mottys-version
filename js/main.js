@@ -123,6 +123,7 @@ async function requestBotBlackHole(fen, botColor, level) {
     fen,
     botColor,
     level,
+    firstPick: sequence === 1,
     seed: `${state.match?.seed || 'game'}#bot-hole#${botColor}#${sequence}#${state.match?.ply || 0}`,
   });
   return result.strategy;
@@ -240,8 +241,15 @@ function reactToMove(move, byBot) {
 
 function reactToBlackHole(event) {
   if (!event || !['playing', 'placing'].includes(state.screen)) return;
-  const mine = event.victimColor === state.myColor;
-  showTaunt(pickTaunt(mine ? 'holeHitYou' : 'holeHitMe', { chance: 0.65, minGapMs: 7000 }));
+  // A trap now catches its own owner too, so MottyBot needs to know not just
+  // who lost a piece but whose trap actually did it, or its trash talk would
+  // take credit for traps it never set.
+  const victimIsMe = event.victimColor === state.myColor;
+  const ownTrap = event.owner === event.victimColor;
+  const category = victimIsMe
+    ? (ownTrap ? 'holeHitYouByYou' : 'holeHitYouByMe')
+    : (ownTrap ? 'holeHitMeByMe' : 'holeHitMeByYou');
+  showTaunt(pickTaunt(category, { chance: 0.65, minGapMs: 7000 }));
 }
 
 function setHoleStatus({ phase = 'idle', title, copy, route = '' }) {
@@ -323,7 +331,7 @@ function panelHome() {
   panel.innerHTML = `
     <div class="desk-head">
       <h1>One square is lying to you.</h1>
-      <p>You and MottyBot each hide a one-use black hole. Land on your opponent's square and your piece vanishes. Then the square opens again.</p>
+      <p>You and MottyBot each hide a one-use black hole. Land on one, even your own, and the piece is gone. Then the square opens again.</p>
     </div>
     <div class="desk-body">
       ${shared ? `
@@ -343,7 +351,7 @@ function panelHome() {
         </div>` : ''}
       <div class="rule-sequence" role="group" aria-label="How a turn works">
         <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Hide one black hole</strong><p>Any empty square. You see yours, MottyBot never does.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Play legal chess</strong><p>Anything of theirs that lands on your square is gone. The square reopens at once.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Play legal chess</strong><p>Whatever lands on your square is gone, even your own piece. The square reopens at once.</p></div></div>
         <div class="rule-step"><span class="rule-step__number">3</span><div><strong>One fall, one re-arm</strong><p>Only the player whose trap fired picks a new square.</p></div></div>
       </div>
       <div class="button-stack">
@@ -473,12 +481,17 @@ function renderMoveList() {
   for (let i = 0; i < log.length; i++) {
     const entry = log[i];
     if (entry.kind === 'move') {
-      const trigger = log[i + 1]?.kind === 'black-hole' ? log[i + 1] : null;
+      // Usually at most one trigger follows a move. A square shared by both
+      // secret traps can produce two: the landing spends both at once, so
+      // every consecutive black-hole entry belongs to this move, not just
+      // the first.
+      const triggers = [];
+      for (let j = i + 1; log[j]?.kind === 'black-hole'; j++) triggers.push(log[j]);
       const number = Math.floor(entry.ply / 2) + 1;
       blocks.push(`
         <div class="turn-record">
           <div class="move-line"><span class="move-number">${number}${entry.color === 'w' ? '.' : '…'}</span><span class="move-san">${escapeHTML(entry.san)}</span><span class="move-side">${entry.color === state.myColor ? 'You' : 'MottyBot'}</span></div>
-          ${trigger ? `<div class="hole-line">${capitalize(PIECE_NAMES[trigger.piece.type])} lost at ${trigger.square}. Square reopened.</div>` : ''}
+          ${triggers.map((trigger) => `<div class="hole-line">${capitalize(PIECE_NAMES[trigger.piece.type])} lost at ${trigger.square}. Square reopened.</div>`).join('')}
         </div>`);
     } else if (entry.kind === 'relocation') {
       const number = Math.floor(entry.ply / 2) + 1;
@@ -877,6 +890,10 @@ async function playMoveAnimation(move, { instant = false } = {}) {
   return true;
 }
 
+// events normally holds one trigger. It holds two only when both players
+// secretly chose the same square and something lands there, spending both
+// traps at once; each still gets its own animation and its own re-arm turn,
+// in sequence.
 async function playBlackHole(events) {
   const match = state.match;
   const serial = state.serial;
@@ -887,52 +904,53 @@ async function playBlackHole(events) {
     return;
   }
 
-  const event = events[0];
-  const owner = event.owner === state.myColor ? 'Your' : "MottyBot's";
-  const victim = event.victimColor === state.myColor ? 'your' : "MottyBot's";
-  state.animating = true;
-  setHoleStatus({
-    phase: 'triggered',
-    title: `${owner} black hole opened on ${event.square}`,
-    copy: `${capitalize(victim)} ${PIECE_NAMES[event.piece.type]} fell in. ${event.square} is open again.`,
-    route: event.square,
-  });
-  announce(`${owner} black hole opened on ${event.square}. ${capitalize(victim)} ${PIECE_NAMES[event.piece.type]} was removed. The square is open again.`);
-  sound.blackHole();
-  await board.animateBlackHole({
-    ...event,
-    consumeOwnHole: event.owner === state.myColor,
-  });
-  if (state.match !== match || state.serial !== serial) return;
-  state.animating = false;
-  if (state.over) return;
-  syncBoard();
-  renderMoveList();
-  renderCaptured();
-  updateCheckMark();
-  reactToBlackHole(event);
-
-  if (match.status().over) {
-    persistGame();
-    return;
-  }
-
-  if (event.owner === state.myColor) {
-    await choosePlayerBlackHole();
-  } else {
-    const replacement = await chooseBotBlackHole();
-    if (state.match !== match || state.serial !== serial || state.over) return;
-    syncBoard();
+  for (const event of events) {
+    const owner = event.owner === state.myColor ? 'Your' : "MottyBot's";
+    const victim = event.victimColor === state.myColor ? 'your' : "MottyBot's";
+    state.animating = true;
     setHoleStatus({
-      phase: 'armed',
-      title: replacement ? 'MottyBot hid a new black hole' : 'MottyBot has no empty square left',
-      copy: replacement
-        ? `Its new trap is secret. Your black hole remains armed on ${match.activeBlackHole(state.myColor)}.`
-        : `Your black hole remains armed on ${match.activeBlackHole(state.myColor)}.`,
-      route: `${match.blackHolesTriggered()} triggered`,
+      phase: 'triggered',
+      title: `${owner} black hole opened on ${event.square}`,
+      copy: `${capitalize(victim)} ${PIECE_NAMES[event.piece.type]} fell in. ${event.square} is open again.`,
+      route: event.square,
     });
+    announce(`${owner} black hole opened on ${event.square}. ${capitalize(victim)} ${PIECE_NAMES[event.piece.type]} was removed. The square is open again.`);
+    sound.blackHole();
+    await board.animateBlackHole({
+      ...event,
+      consumeOwnHole: event.owner === state.myColor,
+    });
+    if (state.match !== match || state.serial !== serial) return;
+    state.animating = false;
+    if (state.over) return;
+    syncBoard();
+    renderMoveList();
+    renderCaptured();
+    updateCheckMark();
+    reactToBlackHole(event);
+
+    if (match.status().over) {
+      persistGame();
+      return;
+    }
+
+    if (event.owner === state.myColor) {
+      await choosePlayerBlackHole();
+    } else {
+      const replacement = await chooseBotBlackHole();
+      if (state.match !== match || state.serial !== serial || state.over) return;
+      syncBoard();
+      setHoleStatus({
+        phase: 'armed',
+        title: replacement ? 'MottyBot hid a new black hole' : 'MottyBot has no empty square left',
+        copy: replacement
+          ? `Its new trap is secret. Your black hole remains armed on ${match.activeBlackHole(state.myColor)}.`
+          : `Your black hole remains armed on ${match.activeBlackHole(state.myColor)}.`,
+        route: `${match.blackHolesTriggered()} triggered`,
+      });
+    }
+    if (state.match !== match || state.serial !== serial || state.over) return;
   }
-  if (state.match !== match || state.serial !== serial || state.over) return;
   persistGame();
 }
 
@@ -1302,11 +1320,13 @@ function showRules() {
     <div class="modal__body">
       <ol class="rule-list">
         <li><span class="rule-mark">1</span><span><b>You each hide one black hole.</b> Any empty square. You see yours, MottyBot never sees it, and you may both pick the same square without knowing.</span></li>
-        <li><span class="rule-mark">2</span><span><b>It only swallows your opponent.</b> Your own pieces sit on it safely, and a piece has to land there. Passing over it does nothing.</span></li>
+        <li><span class="rule-mark">2</span><span><b>It swallows anyone who lands on it, you included.</b> A piece has to land there; passing over it does nothing. Your own trap is no safer for you than it is for MottyBot.</span></li>
         <li><span class="rule-mark">3</span><span><b>Whatever lands there is gone.</b> That includes a rook landing as you castle. If the move was a capture, both pieces leave the board: the one that was taken, and the one that took it.</span></li>
         <li><span class="rule-mark">4</span><span><b>One trap, one victim.</b> The square turns ordinary the instant it fires, and anything may use it later. Only the player whose trap fired picks a new square; your opponent keeps theirs.</span></li>
         <li><span class="rule-mark">5</span><span><b>You can move your trap three times a game.</b> It costs your whole turn instead of a chess move, and you cannot do it while your king is in check.</span></li>
-        <li><span class="rule-mark">6</span><span><b>Your king is not safe either.</b> If your king lands on their trap, you lose on the spot. Checkmate, stalemate, resignation and the fifty-move rule all still work, and two bare kings keep playing, because a trap can still end it.</span></li>
+        <li><span class="rule-mark">6</span><span><b>Your king is not safe either.</b> If your king lands on any trap, yours or theirs, you lose on the spot. Checkmate, stalemate, resignation and the fifty-move rule all still work, and two bare kings keep playing, because a trap can still end it.</span></li>
+        <li><span class="rule-mark">7</span><span><b>Your very first black hole can't touch a king.</b> Not yours, not MottyBot's. Once it fires and you pick again, that limit is gone.</span></li>
+        <li><span class="rule-mark">8</span><span><b>Your very first black hole can't sit in front of your own pawns.</b> Once it fires and you pick again, that row opens up too.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);

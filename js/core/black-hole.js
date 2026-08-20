@@ -1,7 +1,7 @@
 // Black Hole Chess: both players keep one secret one-use trap on the board.
-// When an opposing piece lands on it, that piece disappears. The trap is then
-// spent, its square is immediately ordinary again, and the owner chooses a new
-// empty square before the next chess move.
+// When ANY piece lands on it, owner's or opponent's, that piece disappears.
+// The trap is then spent, its square is immediately ordinary again, and the
+// owner chooses a new empty square before the next chess move.
 
 import { Chess } from '../vendor/chess.js';
 import { SQUARES } from './fen.js';
@@ -11,10 +11,50 @@ export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0
 export const MAX_RELOCATIONS = 3;
 
 const otherColor = (color) => color === 'w' ? 'b' : 'w';
+const OWN_THIRD_RANK = { w: '3', b: '6' };
 
 export function eligibleBlackHoleSquares(chess, excluded = []) {
   const blocked = new Set(excluded.filter(Boolean));
   return SQUARES.filter((square) => !blocked.has(square) && !chess.get(square));
+}
+
+function kingAdjacentSquares(chess) {
+  const near = new Set();
+  for (const square of SQUARES) {
+    const piece = chess.get(square);
+    if (!piece || piece.type !== 'k') continue;
+    const file = square.charCodeAt(0) - 97;
+    const rank = square.charCodeAt(1) - 49;
+    for (let df = -1; df <= 1; df++) {
+      for (let dr = -1; dr <= 1; dr++) {
+        if (!df && !dr) continue;
+        const f = file + df;
+        const r = rank + dr;
+        if (f < 0 || f > 7 || r < 0 || r > 7) continue;
+        near.add(String.fromCharCode(97 + f) + String(r + 1));
+      }
+    }
+  }
+  return near;
+}
+
+// Two placement restrictions apply only to a side's very first black hole,
+// before any chess has actually been played: it cannot touch either king,
+// and it cannot sit on the rank directly in front of that side's own pawns
+// (rank 3 for White, rank 6 for Black). Both are opening-only limits. A
+// trap earned mid-game by relocating, or re-armed after firing, may go
+// anywhere empty — by then the position has moved on and the square was
+// found through real chess, not just planted blind on the most obvious
+// square in the room.
+export function firstBlackHoleEligibleSquares(chess, color, excluded = []) {
+  const base = eligibleBlackHoleSquares(chess, excluded);
+  const blocked = kingAdjacentSquares(chess);
+  const thirdRank = OWN_THIRD_RANK[color];
+  if (thirdRank) for (const square of SQUARES) if (square[1] === thirdRank) blocked.add(square);
+  const restricted = base.filter((square) => !blocked.has(square));
+  // A fallback so a cramped custom position can never stall the game over
+  // a rule neither restriction was written to police.
+  return restricted.length ? restricted : base;
 }
 
 export class BlackHoleMatch {
@@ -50,7 +90,9 @@ export class BlackHoleMatch {
 
   eligibleBlackHoles(color) {
     if (!['w', 'b'].includes(color)) return [];
-    return eligibleBlackHoleSquares(this.chess);
+    return this.selectionCount[color] === 0
+      ? firstBlackHoleEligibleSquares(this.chess, color)
+      : eligibleBlackHoleSquares(this.chess);
   }
 
   eligibleRelocationSquares(color) {
@@ -79,9 +121,9 @@ export class BlackHoleMatch {
       throw new Error(`black hole cannot be placed on ${square}`);
     }
 
-    // Secret choices may share a square. Each trap still belongs to its owner
-    // and affects only the opponent, so one landing consumes exactly one trap
-    // and can never force both players to re-arm.
+    // Secret choices may share a square. Each trap still belongs to its
+    // owner and fires independently, so a landing there later can spend one
+    // trap or both, depending on whether one or both owners chose it.
     this.blackHoles[color] = square;
     this.requiredSelections.delete(color);
     const sequence = ++this.selectionCount[color];
@@ -102,7 +144,9 @@ export class BlackHoleMatch {
   // Deterministic last-resort placement for recovery paths and fuzz tests.
   // The public game uses the difficulty-aware strategist in hole-strategy.js.
   selectFallbackBlackHole(color, excluded = []) {
-    const choices = eligibleBlackHoleSquares(this.chess, excluded);
+    const choices = this.selectionCount[color] === 0
+      ? firstBlackHoleEligibleSquares(this.chess, color, excluded)
+      : eligibleBlackHoleSquares(this.chess, excluded);
     if (!choices.length) {
       this.requiredSelections.delete(color);
       return null;
@@ -194,8 +238,6 @@ export class BlackHoleMatch {
 
     const fenBefore = this.fen();
     const move = this.chess.move({ from, to, promotion: promotion || undefined });
-    const opponent = otherColor(move.color);
-    const active = this.blackHoles[opponent];
     const landings = [{
       square: move.to,
       piece: { color: move.color, type: move.promotion || move.piece },
@@ -216,7 +258,17 @@ export class BlackHoleMatch {
       });
     }
 
-    const landing = active ? landings.find((item) => item.square === active) : null;
+    // A trap now catches anything that lands on it, its own owner included,
+    // so every landing is checked against both players' traps rather than
+    // only the mover's opponent. The two traps may legally share a square
+    // (each side picks in secret); a landing there spends both at once.
+    const triggers = [];
+    for (const landing of landings) {
+      for (const owner of ['w', 'b']) {
+        if (this.blackHoles[owner] === landing.square) triggers.push({ owner, ...landing });
+      }
+    }
+
     const entry = {
       kind: 'move',
       ply: this.ply,
@@ -235,66 +287,80 @@ export class BlackHoleMatch {
     this.log.push(entry);
     this.ply++;
     this.resolutionPending = true;
-    this.pendingTrigger = landing ? { owner: opponent, move, moveEntry: entry, ...landing } : null;
+    this.pendingTrigger = triggers.length ? { move, moveEntry: entry, triggers } : null;
     return move;
   }
 
   // Settle the trap check owed by the move just played. Returns null when no
-  // move is awaiting settlement, [] when the move was safe, or one trigger.
+  // move is awaiting settlement, [] when the move was safe, or one event per
+  // trap that fired (normally one; two only when a shared square catches
+  // both owners at once).
   resolveBlackHoleIfDue() {
     if (!this.resolutionPending) return null;
     this.resolutionPending = false;
-    const trigger = this.pendingTrigger;
+    const pending = this.pendingTrigger;
     this.pendingTrigger = null;
-    if (!trigger) return [];
+    if (!pending) return [];
 
-    const fenBefore = this.fen();
-    const removed = this.chess.remove(trigger.square);
-    if (!removed) throw new Error(`black hole on ${trigger.square} found no landing piece`);
-    this.chess.resetHalfMoves();
-
-    this.blackHoles[trigger.owner] = null;
-    this.lastTriggered[trigger.owner] = trigger.square;
-    this.triggeredCount[trigger.owner]++;
-
-    const victimColor = trigger.piece.color;
-    if (trigger.piece.type === 'k') {
-      this.blackHoleWin = {
-        winner: trigger.owner,
-        victim: victimColor,
-        square: trigger.square,
-        piece: trigger.piece.type,
-        cause: 'king-fell',
-      };
-    } else {
-      this.requiredSelections.add(trigger.owner);
-      if (!this.eligibleBlackHoles(trigger.owner).length) {
-        this.requiredSelections.delete(trigger.owner);
+    const events = [];
+    for (const trigger of pending.triggers) {
+      const fenBefore = this.fen();
+      // A shared square means a second trigger can arrive after the first
+      // already removed the piece. It still spends its owner's trap and
+      // still requires a re-arm; it just finds nothing left to remove.
+      if (this.chess.get(trigger.square)) {
+        this.chess.remove(trigger.square);
+        this.chess.resetHalfMoves();
       }
+
+      this.blackHoles[trigger.owner] = null;
+      this.lastTriggered[trigger.owner] = trigger.square;
+      this.triggeredCount[trigger.owner]++;
+
+      const victimColor = trigger.piece.color;
+      if (trigger.piece.type === 'k') {
+        // Losing a king loses the game for that king's own side, whether the
+        // trap that caught it was the opponent's or the victim's own.
+        if (!this.blackHoleWin) {
+          this.blackHoleWin = {
+            winner: otherColor(victimColor),
+            victim: victimColor,
+            square: trigger.square,
+            piece: trigger.piece.type,
+            cause: 'king-fell',
+          };
+        }
+      } else if (!this.blackHoleWin) {
+        this.requiredSelections.add(trigger.owner);
+        if (!this.eligibleBlackHoles(trigger.owner).length) {
+          this.requiredSelections.delete(trigger.owner);
+        }
+      }
+
+      events.push({
+        kind: 'black-hole',
+        ply: this.ply,
+        owner: trigger.owner,
+        victimColor,
+        square: trigger.square,
+        piece: trigger.piece,
+        role: trigger.role,
+        fenBefore,
+        fenAfter: this.fen(),
+        reopened: true,
+        kingLost: trigger.piece.type === 'k',
+      });
     }
 
-    const baseSan = trigger.move.san.replace(/[+#]$/, '');
+    const baseSan = pending.move.san.replace(/[+#]$/, '');
     const finalStatus = this.status();
     const suffix = finalStatus.reason === 'checkmate' ? '#'
       : (!finalStatus.over && this.chess.isCheck()) ? '+' : '';
-    trigger.move.san = baseSan + suffix;
-    trigger.moveEntry.san = trigger.move.san;
+    pending.move.san = baseSan + suffix;
+    pending.moveEntry.san = pending.move.san;
 
-    const event = {
-      kind: 'black-hole',
-      ply: this.ply,
-      owner: trigger.owner,
-      victimColor,
-      square: trigger.square,
-      piece: trigger.piece,
-      role: trigger.role,
-      fenBefore,
-      fenAfter: this.fen(),
-      reopened: true,
-      kingLost: trigger.piece.type === 'k',
-    };
-    this.log.push(event);
-    return [event];
+    this.log.push(...events);
+    return events;
   }
 
   resign(color) {

@@ -7,7 +7,7 @@
 // legal and does not reveal either trap.
 
 import { Chess } from '../vendor/chess.js';
-import { eligibleBlackHoleSquares } from './black-hole.js';
+import { eligibleBlackHoleSquares, firstBlackHoleEligibleSquares } from './black-hole.js';
 import { think } from './engine-ai.js';
 import { makeRng, seedFromString } from './rng.js';
 
@@ -104,11 +104,14 @@ export function planStrategicBlackHole(fen, botColor, level = 'medium', seed = '
   const cfg = { ...(HOLE_STRATEGY_LEVELS[level] || HOLE_STRATEGY_LEVELS.medium), ...(options.strategy || {}) };
   const actualLevel = HOLE_STRATEGY_LEVELS[level] ? level : 'medium';
   const origin = new Chess(fen);
-  const eligible = eligibleBlackHoleSquares(origin);
+  const eligible = options.firstPick
+    ? firstBlackHoleEligibleSquares(origin, botColor)
+    : eligibleBlackHoleSquares(origin);
   if (!eligible.length) return { square: null, candidates: [], plannedMove: null, selectionRank: -1 };
 
   const forecast = new Chess(fen);
   let plannedMove = null;
+  const ownLandingSquares = [];
 
   // When MottyBot moves next, choose that move at the selected chess
   // difficulty and use the resulting position to set a trap for the reply.
@@ -116,8 +119,21 @@ export function planStrategicBlackHole(fen, botColor, level = 'medium', seed = '
   // that the weaker levels later abandon.
   if (forecast.turn() === botColor && !forecast.isGameOver()) {
     plannedMove = think(forecast.fen(), actualLevel, `${seed}#planned-move`, options.move || {});
-    if (plannedMove) forecast.move(plannedMove);
+    if (plannedMove) {
+      const applied = forecast.move(plannedMove);
+      // A trap now catches its own owner too, so a square MottyBot is about
+      // to step on itself is never a candidate: that would be a guaranteed,
+      // entirely avoidable, self-inflicted loss the instant it re-arms.
+      ownLandingSquares.push(applied.to);
+      if (applied.isKingsideCastle()) ownLandingSquares.push(applied.color === 'w' ? 'f1' : 'f8');
+      else if (applied.isQueensideCastle()) ownLandingSquares.push(applied.color === 'w' ? 'd1' : 'd8');
+    }
   }
+
+  const safeEligible = ownLandingSquares.length
+    ? eligible.filter((square) => !ownLandingSquares.includes(square))
+    : eligible;
+  const candidateSquares = safeEligible.length ? safeEligible : eligible;
 
   const opponent = otherColor(botColor);
   const legalReplies = forecast.turn() === opponent && !forecast.isGameOver()
@@ -140,7 +156,7 @@ export function planStrategicBlackHole(fen, botColor, level = 'medium', seed = '
     .map((entry) => ({ ...entry, move: legalByUci.get(uci(entry)) }))
     .filter((entry) => entry.move && Number.isFinite(entry.score));
   const bestReplyScore = root[0]?.score ?? 0;
-  const scoreBySquare = new Map(eligible.map((square) => [square, squareShape(square)]));
+  const scoreBySquare = new Map(candidateSquares.map((square) => [square, squareShape(square)]));
   const routesBySquare = new Map();
   const scoredDestinations = new Set();
   for (const move of legalReplies) {
@@ -188,7 +204,7 @@ export function planStrategicBlackHole(fen, botColor, level = 'medium', seed = '
     }
   }
 
-  const ranked = eligible
+  const ranked = candidateSquares
     .map((square) => ({
       square,
       score: Math.round((scoreBySquare.get(square) + (routesBySquare.get(square) || 0) * 4) * 100) / 100,

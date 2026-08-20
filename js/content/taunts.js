@@ -54,19 +54,33 @@ const TAUNTS = {
     'You have inconvenienced me. Briefly.',
     'Bold. Loud. Temporary.',
   ],
-  holeHitYou: [
+  holeHitYouByMe: [
     'That square was always a bad idea.',
     'You found mine. With your piece.',
     'I was wondering when you would step there.',
     'The board is smaller now. So is your army.',
     'One use. Completely worth it.',
   ],
-  holeHitMe: [
+  holeHitMeByYou: [
     'That square was clearly defective.',
     'Fine. Pick another one.',
     'I knew where it was. I was testing it.',
     'The board ate my piece. Rude.',
     'You get exactly one of those. Until the next one.',
+  ],
+  holeHitYouByYou: [
+    'You forgot where you hid it. I did not have to.',
+    'Your own trap. Your own piece. Tidy.',
+    'I did not even have to do anything for that one.',
+    'You really did that to yourself.',
+    'That one was entirely yours. The trap and the mistake.',
+  ],
+  holeHitMeByMe: [
+    'That was mine. I forgot. It happens to the best of us. Rarely to me.',
+    'Even I step on my own traps. Once. Allegedly.',
+    'A small miscalculation. I am choosing to call it that.',
+    'The most embarrassing kind of loss is a self-inflicted one.',
+    'I would blame the board, but I placed that one myself.',
   ],
   idle: [
     "Take your time. I am not going anywhere.",

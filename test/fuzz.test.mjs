@@ -1,4 +1,5 @@
-import { BlackHoleMatch, replayMatch } from '../js/core/black-hole.js';
+import { Chess } from '../js/vendor/chess.js';
+import { BlackHoleMatch, replayMatch, firstBlackHoleEligibleSquares } from '../js/core/black-hole.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
 import { assert, ok, summary } from './helpers.mjs';
 
@@ -10,6 +11,8 @@ let repeatedSquares = 0;
 let kingFalls = 0;
 let relocations = 0;
 let sharedSquares = 0;
+let selfCatches = 0;
+let firstPicks = 0;
 
 for (let game = 0; game < GAMES; game++) {
   const match = new BlackHoleMatch(`fuzz-${game}`);
@@ -33,10 +36,13 @@ for (let game = 0; game < GAMES; game++) {
     }
     turns++;
 
-    if (events.length) {
-      const event = events[0];
+    // Normally one event. A shared square (both players secretly chose the
+    // same square) can produce two: one trap now catches anyone, including
+    // its own owner, so a single landing can spend both traps at once.
+    for (const event of events) {
       triggers++;
       if (event.kingLost) kingFalls++;
+      if (event.owner === event.victimColor) selfCatches++;
       assert(event.reopened, `trigger ${game}:${step} did not mark its square reopened`);
       assert(!match.chess.get(event.square), `arriving piece survived on ${event.square} in game ${game}`);
       if (!event.kingLost) {
@@ -60,14 +66,23 @@ for (let game = 0; game < GAMES; game++) {
     const white = match.activeBlackHole('w');
     const black = match.activeBlackHole('b');
     if (white && white === black) sharedSquares++;
-    if (white && match.chess.get(white)) {
-      assert(match.chess.get(white).color === 'w', `opponent survived on white black hole ${white}`);
-    }
-    if (black && match.chess.get(black)) {
-      assert(match.chess.get(black).color === 'b', `opponent survived on black black hole ${black}`);
-    }
+    // A trap can only ever be placed on a square that was empty at the time,
+    // and now catches anyone who lands there afterward, its own owner
+    // included, so no piece of either color should ever be found resting on
+    // an active trap square.
+    assert(!white || !match.chess.get(white), `a piece is sitting on white's active black hole at ${white}`);
+    assert(!black || !match.chess.get(black), `a piece is sitting on black's active black hole at ${black}`);
     assert(match.relocationsUsed('w') <= 3 && match.relocationsUsed('b') <= 3,
       `relocation limit exceeded in game ${game}:${step}`);
+  }
+
+  for (const event of match.log) {
+    if (event.kind !== 'placement' || event.sequence !== 1) continue;
+    const boardAtPick = new Chess(event.fenAfter);
+    const stillAllowed = firstBlackHoleEligibleSquares(boardAtPick, event.color);
+    assert(stillAllowed.includes(event.square),
+      `first pick ${event.square} for ${event.color} in game ${game} violated the king-proximity/own-pawn-row limits`);
+    firstPicks++;
   }
 
   const restored = replayMatch(match.seed, match.serializedActions());
@@ -85,10 +100,12 @@ for (let game = 0; game < GAMES; game++) {
     `replay result drift in game ${game}`);
 }
 
-console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${relocations} relocations, ${triggers} triggers, ${repeatedSquares} same-square re-arms, ${sharedSquares} shared-trap states, ${kingFalls} king falls`);
+console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${relocations} relocations, ${triggers} triggers, ${repeatedSquares} same-square re-arms, ${sharedSquares} shared-trap states, ${kingFalls} king falls, ${selfCatches} self-catches`);
 assert(triggers >= Math.floor(GAMES / 2), `black holes triggered suspiciously rarely: ${triggers} across ${GAMES} games`);
 assert(repeatedSquares > 0, 'fuzz run never exercised a same-square rearm');
 assert(relocations > 0, 'fuzz run never exercised a voluntary relocation');
 assert(sharedSquares > 0, 'fuzz run never exercised overlapping active traps');
+assert(selfCatches > 0, 'fuzz run never exercised a trap catching its own owner');
+assert(firstPicks === GAMES * 2, `expected exactly two first picks per game, saw ${firstPicks} across ${GAMES} games`);
 ok(`${GAMES} random games preserved relocation, one-use trap and replay invariants`);
 summary('fuzz.test.mjs');
