@@ -1,5 +1,5 @@
 import { Chess } from '../js/vendor/chess.js';
-import { planStrategicBlackHole } from '../js/core/hole-strategy.js';
+import { planStrategicBlackHole, HOLE_STRATEGY_LEVELS } from '../js/core/hole-strategy.js';
 import { assert, ok, summary } from './helpers.mjs';
 
 const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -27,26 +27,71 @@ const QUICK = { strategy: { replyDepth: 2, replyTimeMs: 45 } };
   ok('expert targets the destination of the opponent\'s forced best move');
 }
 
+// Trap quality is measured by the VALUE of the square chosen, not by its
+// position in the ranking. Rank is the wrong yardstick: when the best two
+// squares score identically, taking the second one costs nothing, and a test
+// that demanded rank 0 was the reason Expert was perfectly predictable.
 {
-  const averageRank = {};
+  // Several positions, because a single one cannot separate the levels: at the
+  // start the two best squares score identically, so Club and Expert both keep
+  // 100% of the available value and tie.
+  const BOARDS = [
+    START,
+    'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 0 1',
+    'r2q1rk1/pp2bppp/2n1bn2/2pp4/3P4/2P1PN2/PPBN1PPP/R1BQ1RK1 w - - 0 1',
+    '8/5ppp/8/3k4/8/4K3/5PPP/3R4 w - - 0 1',
+  ];
+  const retained = {};
   for (const level of ['easy', 'medium', 'hard']) {
     let total = 0;
+    let plans = 0;
+    const samples = 16;
+    for (const board of BOARDS) {
+      for (let i = 0; i < samples; i++) {
+        const plan = planStrategicBlackHole(board, 'b', level, `quality-${i}`, {
+          strategy: { replyDepth: 1, replyTimeMs: 25 },
+        });
+        const best = Math.max(...plan.candidates.map((entry) => entry.score));
+        const chosen = plan.candidates.find((entry) => entry.square === plan.square).score;
+        total += best > 0 ? chosen / best : 1;
+        plans++;
+        const floor = HOLE_STRATEGY_LEVELS[level].spreadMargin;
+        assert(best <= 0 || chosen / best >= floor - 1e-9,
+          `${level} chose ${plan.square} at ${(chosen / best * 100).toFixed(0)}% of the best square, below its ${floor * 100}% margin`);
+      }
+    }
+    retained[level] = total / plans;
+  }
+  console.log(`  trap value kept: casual ${(retained.easy * 100).toFixed(0)}%, club ${(retained.medium * 100).toFixed(0)}%, expert ${(retained.hard * 100).toFixed(0)}%`);
+  assert(retained.hard > retained.medium && retained.medium > retained.easy,
+    `trap quality did not scale with difficulty: ${JSON.stringify(retained)}`);
+  ok('trap-selection precision rises from Casual to Club to Expert');
+}
+
+// Regression: Expert's opening trap was c3 in twelve games out of twelve,
+// because reply likelihood decayed by the move's index in the search's list
+// rather than by its score. The top five opening replies all score the same, so
+// the ordering being trusted was an artifact of move generation. A trap the
+// opponent can memorise after one game is not hidden, which is the whole
+// mechanic. The opening is the one position that is identical every single
+// game, so it is the only place where concentration is genuinely exploitable.
+{
+  for (const level of ['medium', 'hard']) {
+    const counts = new Map();
     const samples = 60;
     for (let i = 0; i < samples; i++) {
-      const plan = planStrategicBlackHole(START, 'b', level, `quality-${i}`, {
-        strategy: { replyDepth: 1, replyTimeMs: 25 },
-      });
-      total += plan.selectionRank;
-      if (level === 'hard') assert(plan.selectionRank === 0, 'expert chose below the top-ranked trap');
-      if (level === 'medium') assert(plan.selectionRank <= 2, 'club chose outside its top three traps');
-      if (level === 'easy') assert(plan.selectionRank <= 7, 'casual chose outside its strategic shortlist');
+      const square = planStrategicBlackHole(START, 'b', level, `opening-${i}#bot-hole#b#1#0`, {
+        strategy: { replyDepth: 2, replyTimeMs: 40 },
+      }).square;
+      counts.set(square, (counts.get(square) || 0) + 1);
     }
-    averageRank[level] = total / samples;
+    const [square, hits] = [...counts].sort((a, b) => b[1] - a[1])[0];
+    const share = hits / samples;
+    console.log(`  ${level} opening trap: ${counts.size} distinct squares, most common ${square} at ${(share * 100).toFixed(0)}%`);
+    assert(counts.size > 1, `${level} always opens with the same trap on ${square}: it is memorisable`);
+    assert(share <= 0.75, `${level} opens on ${square} in ${(share * 100).toFixed(0)}% of games, predictable enough to play around`);
   }
-  console.log(`  trap rank average: casual ${averageRank.easy.toFixed(2)}, club ${averageRank.medium.toFixed(2)}, expert ${averageRank.hard.toFixed(2)}`);
-  assert(averageRank.hard < averageRank.medium && averageRank.medium < averageRank.easy,
-    `trap quality did not scale with difficulty: ${JSON.stringify(averageRank)}`);
-  ok('trap-selection precision rises from Casual to Club to Expert');
+  ok('the opening trap cannot be memorised from one game');
 }
 
 {

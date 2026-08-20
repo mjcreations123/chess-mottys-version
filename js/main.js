@@ -328,8 +328,8 @@ function panelHome() {
     <div class="desk-body">
       ${shared ? `
         <div class="resume-card">
-          <strong>A shared trap is ready</strong>
-          <p>Same MottyBot black-hole seed, ${escapeHTML(BOTS[shared.level].label.toLowerCase())} difficulty. You still choose your own secret square.</p>
+          <strong>Someone sent you this board</strong>
+          <p>MottyBot opens with its black hole on the same square it used against them, at ${escapeHTML(BOTS[shared.level].label.toLowerCase())} difficulty. Where you hide yours is still yours to pick.</p>
           <button class="btn btn--magic" id="play-shared">Play this challenge</button>
         </div>` : ''}
       ${active ? `
@@ -1089,7 +1089,7 @@ function showResultModal() {
           Share result
         </button>
         <button class="btn btn--secondary" id="result-new">Play again</button>
-        <button class="btn btn--secondary" id="result-same">Replay the same seed</button>
+        <button class="btn btn--secondary" id="result-same" title="A new game in which MottyBot hides its black hole on the same square it used here">Rematch, same traps</button>
         <button class="btn btn--quiet" id="result-review">Review the game</button>
       </div>
       <div class="copy-confirm" id="copy-confirm" aria-live="polite"></div>
