@@ -1326,7 +1326,7 @@ function showRules() {
         <li><span class="rule-mark">5</span><span><b>You can move your trap three times a game.</b> It costs your whole turn instead of a chess move, and you cannot do it while your king is in check.</span></li>
         <li><span class="rule-mark">6</span><span><b>Your king is not safe either.</b> If your king lands on any trap, yours or theirs, you lose on the spot. Checkmate, stalemate, resignation and the fifty-move rule all still work, and two bare kings keep playing, because a trap can still end it.</span></li>
         <li><span class="rule-mark">7</span><span><b>Your very first black hole can't touch a king.</b> Not yours, not MottyBot's. Once it fires and you pick again, that limit is gone.</span></li>
-        <li><span class="rule-mark">8</span><span><b>Your very first black hole can't sit in front of your own pawns.</b> Once it fires and you pick again, that row opens up too.</span></li>
+        <li><span class="rule-mark">8</span><span><b>Your very first black hole can't sit in front of MottyBot's pawns.</b> No camping on the row its pieces are about to walk into. Once it fires and you pick again, that row opens up too.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);

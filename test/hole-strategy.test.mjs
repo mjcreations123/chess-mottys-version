@@ -133,15 +133,17 @@ const QUICK = { strategy: { replyDepth: 2, replyTimeMs: 45 } };
 }
 
 // The engine's own eligibility filter would reject a first-pick candidate
-// beside a king or in front of the bot's own pawns, falling back to a random
-// square. The strategist needs to already know about both blind spots itself,
-// so its top choice never gets discarded by that safety net.
+// beside a king or in front of the opponent's pawns, falling back to a
+// random square. The strategist needs to already know about both blind
+// spots itself, so its top choice never gets discarded by that safety net.
 {
   const plan = planStrategicBlackHole(START, 'b', 'hard', 'first-pick-guard', {
     strategy: { replyDepth: 2, replyTimeMs: 40 },
     firstPick: true,
   });
-  const forbidden = ['a6', 'b6', 'c6', 'd6', 'e6', 'f6', 'g6', 'h6', 'd8', 'd7', 'e7', 'f8', 'f7', 'd1', 'd2', 'e2', 'f1', 'f2'];
+  // Black's opponent is White, so it is White's third rank (c3/f3 and
+  // neighbors) that is off limits here, not Black's own.
+  const forbidden = ['a3', 'b3', 'c3', 'd3', 'e3', 'f3', 'g3', 'h3', 'd8', 'd7', 'e7', 'f8', 'f7', 'd1', 'd2', 'e2', 'f1', 'f2'];
   for (const square of forbidden) {
     assert(!plan.candidates.some((entry) => entry.square === square),
       `firstPick candidates included ${square}, which the engine would reject as a first pick`);

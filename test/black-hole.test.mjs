@@ -235,12 +235,9 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
 }
 
 {
-  // e3 is White's own third rank, off limits for a first pick; relocating
-  // there once the position has moved on is how this scenario is reached.
-  const match = at('4k3/8/8/8/3p4/8/8/4K3 b - - 0 1', 'a4', 'h5', 'single-rearm-reverse');
-  match.applyMove({ from: 'e8', to: 'd8' });
-  match.resolveBlackHoleIfDue();
-  match.relocateBlackHole('w', 'e3');
+  // e3 is in front of White's OWN pawns, not the opponent's, so it is a
+  // legal first pick for White even before anything has moved.
+  const match = at('4k3/8/8/8/3p4/8/8/4K3 b - - 0 1', 'e3', 'h5', 'single-rearm-reverse');
   match.chess.put({ type: 'p', color: 'w' }, 'e3');
   match.applyMove({ from: 'd4', to: 'e3' });
   const [event] = match.resolveBlackHoleIfDue();
@@ -270,23 +267,27 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
 }
 
 {
+  // c3/f3 are the rank White's OWN pieces develop to, which is exactly why
+  // camping a first pick there against Black used to be so cheap: it is
+  // Black's opponent (White) whose pawns that rank sits in front of.
   const match = new BlackHoleMatch('third-rank');
   match.chess.load('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
   const whiteFirst = match.eligibleBlackHoles('w');
-  for (const sq of ['a3', 'b3', 'c3', 'd3', 'e3', 'f3', 'g3', 'h3']) {
-    assert(!whiteFirst.includes(sq), `White's own first pick allowed ${sq}, in front of its own pawns`);
+  for (const sq of ['a6', 'b6', 'c6', 'd6', 'e6', 'f6', 'g6', 'h6']) {
+    assert(!whiteFirst.includes(sq), `White's first pick allowed ${sq}, in front of Black's pawns`);
   }
+  assert(whiteFirst.includes('c3'), 'the restriction leaked onto White\'s own third rank, which nobody asked for');
   let rejected = false;
-  try { match.selectBlackHole('w', 'c3'); } catch { rejected = true; }
-  assert(rejected, 'White\'s very first black hole was allowed onto its own third rank');
+  try { match.selectBlackHole('w', 'e6'); } catch { rejected = true; }
+  assert(rejected, 'White\'s very first black hole was allowed onto the rank in front of Black\'s pawns');
   match.selectBlackHole('w', 'd4');
 
   const blackFirst = match.eligibleBlackHoles('b');
-  for (const sq of ['a6', 'b6', 'c6', 'd6', 'e6', 'f6', 'g6', 'h6']) {
-    assert(!blackFirst.includes(sq), `Black's own first pick allowed ${sq}, in front of its own pawns`);
+  for (const sq of ['a3', 'b3', 'c3', 'd3', 'e3', 'f3', 'g3', 'h3']) {
+    assert(!blackFirst.includes(sq), `Black's first pick allowed ${sq}, in front of White's pawns`);
   }
-  assert(blackFirst.includes('d3'), 'the restriction leaked onto a rank nobody asked for');
-  ok('the first black hole cannot be planted in front of its own owner\'s pawns');
+  assert(blackFirst.includes('d6'), 'the restriction leaked onto Black\'s own third rank, which nobody asked for');
+  ok('the first black hole cannot be planted in front of the opponent\'s pawns');
 }
 
 {
@@ -294,8 +295,8 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   match.applyMove({ from: 'e4', to: 'e5' });
   match.resolveBlackHoleIfDue();
   const rearmChoices = match.eligibleBlackHoles('b');
-  assert(rearmChoices.includes('e6'), 'the re-arm pick was still blocked from the rank in front of Black\'s own pawns');
-  ok('the rank-in-front-of-your-own-pawns limit applies only to the very first black hole');
+  assert(rearmChoices.includes('e3'), 'the re-arm pick was still blocked from the rank in front of White\'s pawns');
+  ok('the rank-in-front-of-the-opponent limit applies only to the very first black hole');
 }
 
 {

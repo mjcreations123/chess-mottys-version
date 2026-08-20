@@ -81,7 +81,7 @@ for (let game = 0; game < GAMES; game++) {
     const boardAtPick = new Chess(event.fenAfter);
     const stillAllowed = firstBlackHoleEligibleSquares(boardAtPick, event.color);
     assert(stillAllowed.includes(event.square),
-      `first pick ${event.square} for ${event.color} in game ${game} violated the king-proximity/own-pawn-row limits`);
+      `first pick ${event.square} for ${event.color} in game ${game} violated the king-proximity/opponent-pawn-row limits`);
     firstPicks++;
   }
 

@@ -11,7 +11,11 @@ export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0
 export const MAX_RELOCATIONS = 3;
 
 const otherColor = (color) => color === 'w' ? 'b' : 'w';
-const OWN_THIRD_RANK = { w: '3', b: '6' };
+// The rank c3/f3 sit on (White's third rank) is where White's own pieces
+// habitually develop, so it is Black's first pick that finds it cheap to
+// camp there — and the mirror image on rank 6 for White. The restriction
+// below is keyed by the OPPONENT's pawns, not the placing side's own.
+const OPPONENT_THIRD_RANK = { w: '6', b: '3' };
 
 export function eligibleBlackHoleSquares(chess, excluded = []) {
   const blocked = new Set(excluded.filter(Boolean));
@@ -40,16 +44,17 @@ function kingAdjacentSquares(chess) {
 
 // Two placement restrictions apply only to a side's very first black hole,
 // before any chess has actually been played: it cannot touch either king,
-// and it cannot sit on the rank directly in front of that side's own pawns
-// (rank 3 for White, rank 6 for Black). Both are opening-only limits. A
+// and it cannot sit on the rank directly in front of the OPPONENT's pawns
+// (rank 6 for White, rank 3 for Black) — the rank the opponent's own minor
+// pieces and pawns are about to travel to. Both are opening-only limits. A
 // trap earned mid-game by relocating, or re-armed after firing, may go
 // anywhere empty — by then the position has moved on and the square was
 // found through real chess, not just planted blind on the most obvious
-// square in the room.
+// ambush in the room.
 export function firstBlackHoleEligibleSquares(chess, color, excluded = []) {
   const base = eligibleBlackHoleSquares(chess, excluded);
   const blocked = kingAdjacentSquares(chess);
-  const thirdRank = OWN_THIRD_RANK[color];
+  const thirdRank = OPPONENT_THIRD_RANK[color];
   if (thirdRank) for (const square of SQUARES) if (square[1] === thirdRank) blocked.add(square);
   const restricted = base.filter((square) => !blocked.has(square));
   // A fallback so a cramped custom position can never stall the game over
