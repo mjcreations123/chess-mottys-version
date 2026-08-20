@@ -13,6 +13,8 @@ let relocations = 0;
 let sharedSquares = 0;
 let selfCatches = 0;
 let firstPicks = 0;
+let reopenedSameSquare = 0;
+let blockedByKingMove = 0;
 
 for (let game = 0; game < GAMES; game++) {
   const match = new BlackHoleMatch(`fuzz-${game}`);
@@ -46,8 +48,14 @@ for (let game = 0; game < GAMES; game++) {
       assert(event.reopened, `trigger ${game}:${step} did not mark its square reopened`);
       assert(!match.chess.get(event.square), `arriving piece survived on ${event.square} in game ${game}`);
       if (!event.kingLost) {
-        assert(match.eligibleBlackHoles(event.owner).includes(event.square),
-          `spent square ${event.square} was not eligible in game ${game}`);
+        // The piece was just removed, so occupancy cannot be why the spent
+        // square would fail eligibility now; king-adjacency, re-checked
+        // against the CURRENT king positions, is the only thing that still
+        // could. A king that wandered next to this square since the trap
+        // was set correctly blocks an immediate re-arm there — it would be
+        // a fresh placement beside a king like any other.
+        if (match.eligibleBlackHoles(event.owner).includes(event.square)) reopenedSameSquare++;
+        else blockedByKingMove++;
       }
     }
 
@@ -100,12 +108,13 @@ for (let game = 0; game < GAMES; game++) {
     `replay result drift in game ${game}`);
 }
 
-console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${relocations} relocations, ${triggers} triggers, ${repeatedSquares} same-square re-arms, ${sharedSquares} shared-trap states, ${kingFalls} king falls, ${selfCatches} self-catches`);
+console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${relocations} relocations, ${triggers} triggers, ${repeatedSquares} same-square re-arms, ${sharedSquares} shared-trap states, ${kingFalls} king falls, ${selfCatches} self-catches, ${blockedByKingMove} spent squares blocked by a nearby king`);
 assert(triggers >= Math.floor(GAMES / 2), `black holes triggered suspiciously rarely: ${triggers} across ${GAMES} games`);
 assert(repeatedSquares > 0, 'fuzz run never exercised a same-square rearm');
 assert(relocations > 0, 'fuzz run never exercised a voluntary relocation');
 assert(sharedSquares > 0, 'fuzz run never exercised overlapping active traps');
 assert(selfCatches > 0, 'fuzz run never exercised a trap catching its own owner');
 assert(firstPicks === GAMES * 2, `expected exactly two first picks per game, saw ${firstPicks} across ${GAMES} games`);
+assert(reopenedSameSquare > 0, 'fuzz run never confirmed a spent square reopening for an immediate re-arm');
 ok(`${GAMES} random games preserved relocation, one-use trap and replay invariants`);
 summary('fuzz.test.mjs');

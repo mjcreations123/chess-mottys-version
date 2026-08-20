@@ -3,14 +3,14 @@ import { think } from './core/engine-ai.js';
 import { planStrategicBlackHole } from './core/hole-strategy.js';
 
 self.onmessage = (e) => {
-  const { id, kind = 'move', fen, level, seed, botColor, firstPick } = e.data;
+  const { id, kind = 'move', fen, level, seed, botColor, firstPick, avoidSquares } = e.data;
   try {
     if (kind === 'hole') {
       const strategy = planStrategicBlackHole(fen, botColor, level, seed, { firstPick });
       self.postMessage({ id, strategy });
       return;
     }
-    const move = think(fen, level, seed);
+    const move = think(fen, level, seed, { avoidSquares });
     self.postMessage({ id, move });
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message || err) });

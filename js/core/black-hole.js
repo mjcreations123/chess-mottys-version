@@ -17,11 +17,6 @@ const otherColor = (color) => color === 'w' ? 'b' : 'w';
 // below is keyed by the OPPONENT's pawns, not the placing side's own.
 const OPPONENT_THIRD_RANK = { w: '6', b: '3' };
 
-export function eligibleBlackHoleSquares(chess, excluded = []) {
-  const blocked = new Set(excluded.filter(Boolean));
-  return SQUARES.filter((square) => !blocked.has(square) && !chess.get(square));
-}
-
 function kingAdjacentSquares(chess) {
   const near = new Set();
   for (const square of SQUARES) {
@@ -42,23 +37,41 @@ function kingAdjacentSquares(chess) {
   return near;
 }
 
-// Two placement restrictions apply only to a side's very first black hole,
-// before any chess has actually been played: it cannot touch either king,
-// and it cannot sit on the rank directly in front of the OPPONENT's pawns
-// (rank 6 for White, rank 3 for Black) — the rank the opponent's own minor
-// pieces and pawns are about to travel to. Both are opening-only limits. A
-// trap earned mid-game by relocating, or re-armed after firing, may go
-// anywhere empty — by then the position has moved on and the square was
-// found through real chess, not just planted blind on the most obvious
-// ambush in the room.
+// No black hole may ever sit beside a king, its own or the opponent's — not
+// on the first pick, not on a re-arm, not on a relocation. This is a
+// standing restriction, checked fresh against the CURRENT king positions
+// every time a square is offered, so a trap already sitting there before a
+// king walked up next to it is unaffected; only new placements are turned
+// away. One consequence: a castling rook's landing square (f1/d1/f8/d8) is
+// always adjacent to its king's home square for as long as that side can
+// still castle, so a black hole can never be planted on it while castling
+// remains legal — the "castling rook falls into a trap" case from the
+// rules text can no longer happen.
+export function eligibleBlackHoleSquares(chess, excluded = []) {
+  const blocked = new Set(excluded.filter(Boolean));
+  for (const square of kingAdjacentSquares(chess)) blocked.add(square);
+  const base = SQUARES.filter((square) => !blocked.has(square) && !chess.get(square));
+  if (base.length) return base;
+  // Fallback so an extremely cramped custom position (kings within a couple
+  // of squares of each other, almost nothing empty) can never stall the
+  // game over a rule not written to police that corner case.
+  const occupancyOnly = new Set(excluded.filter(Boolean));
+  return SQUARES.filter((square) => !occupancyOnly.has(square) && !chess.get(square));
+}
+
+// A second restriction applies only to a side's very first black hole,
+// before any chess has actually been played: it cannot sit on the rank
+// directly in front of the OPPONENT's pawns (rank 6 for White, rank 3 for
+// Black) — the rank the opponent's own minor pieces and pawns are about to
+// travel to. A trap earned mid-game by relocating, or re-armed after
+// firing, may use that rank freely — by then the position has moved on and
+// the square was found through real chess, not just planted blind on the
+// most obvious ambush in the room.
 export function firstBlackHoleEligibleSquares(chess, color, excluded = []) {
   const base = eligibleBlackHoleSquares(chess, excluded);
-  const blocked = kingAdjacentSquares(chess);
   const thirdRank = OPPONENT_THIRD_RANK[color];
-  if (thirdRank) for (const square of SQUARES) if (square[1] === thirdRank) blocked.add(square);
-  const restricted = base.filter((square) => !blocked.has(square));
-  // A fallback so a cramped custom position can never stall the game over
-  // a rule neither restriction was written to police.
+  if (!thirdRank) return base;
+  const restricted = base.filter((square) => square[1] !== thirdRank);
   return restricted.length ? restricted : base;
 }
 

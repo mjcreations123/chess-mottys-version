@@ -189,22 +189,24 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   ok('a king that lands on a black hole loses immediately, even several squares from where the trap was set');
 }
 
+// Regression: king-adjacency used to apply only to a first pick, and this
+// test worked around that by relocating a trap onto f1 (beside White's
+// still-uncastled king) to prove a castling rook could trigger it. Now that
+// no black hole may EVER sit beside a king — first pick, re-arm, or
+// relocation — that setup is impossible: f1 and d1 are always adjacent to
+// White's home square for as long as White can still castle. This is now a
+// negative test proving that impossibility, on both castling sides, rather
+// than a positive test of a mechanic that can no longer occur.
 {
-  // f1 sits beside White's uncastled king (e1), so Black's very first pick
-  // could never land there. Relocating once the position has moved on is
-  // how the castling-rook mechanic is meant to be reached now.
-  const match = at('4k3/8/8/8/8/8/4P3/4K2R w K - 0 1', 'a4', 'h4', 'castle');
-  assert(match.eligibleRelocationSquares('b').includes('f1'),
-    'relocation should be able to reach a square beside a king even though a first pick cannot');
-  match.applyMove({ from: 'e2', to: 'e3' });
-  assert(match.resolveBlackHoleIfDue().length === 0, 'a quiet pawn move triggered a black hole');
-  const relocation = match.relocateBlackHole('b', 'f1');
-  assert(relocation.to === 'f1', 'relocation onto the castling square failed');
-  match.applyMove({ from: 'e1', to: 'g1' });
-  const [event] = match.resolveBlackHoleIfDue();
-  assert(event.role === 'castling rook' && event.piece.type === 'r', 'castling rook did not trigger its landing square');
-  assert(match.chess.get('g1')?.type === 'k' && !match.chess.get('f1'), 'the trap removed the wrong castling piece');
-  ok('a castling rook can fall into a black hole placed there after the opening');
+  const match = at('4k3/8/8/8/8/8/4P3/R3K2R w KQ - 0 1', 'a4', 'h4', 'castle-guard');
+  for (const square of ['f1', 'd1']) {
+    assert(!match.eligibleRelocationSquares('b').includes(square),
+      `${square} sits beside White's uncastled king and should not be reachable by relocation`);
+    let rejected = false;
+    try { match.relocateBlackHole('b', square); } catch { rejected = true; }
+    assert(rejected, `relocating onto ${square}, beside White's king, was accepted`);
+  }
+  ok('a black hole can never be planted on a castling rook\'s landing square while that side can still castle');
 }
 
 {
@@ -264,6 +266,29 @@ function at(fen, whiteHole, blackHole, seed = 'rule-test') {
   try { match.selectBlackHole('w', 'e2'); } catch { rejected = true; }
   assert(rejected, 'a first pick beside a king was accepted');
   ok('the first black hole cannot be planted beside either king');
+}
+
+// King-adjacency is a standing rule now, not a first-pick-only one: it must
+// also turn away a relocation and a post-trigger re-arm, using the CURRENT
+// king positions at the moment of that later placement, not the opening.
+{
+  const match = at('k3r3/8/8/8/4P3/8/8/4K3 w - - 37 1', 'a4', 'e5', 'king-proximity-later');
+  for (const near of ['d1', 'd2', 'e2', 'f1', 'f2']) {
+    assert(!match.eligibleRelocationSquares('w').includes(near),
+      `relocation offered ${near}, beside White's own king`);
+  }
+  let rejected = false;
+  try { match.relocateBlackHole('w', 'e2'); } catch { rejected = true; }
+  assert(rejected, 'a relocation beside a king was accepted');
+
+  match.applyMove({ from: 'e4', to: 'e5' });
+  match.resolveBlackHoleIfDue();
+  const rearmChoices = match.eligibleBlackHoles('b');
+  for (const near of ['d1', 'd2', 'e2', 'f1', 'f2', 'a7', 'b7', 'b8']) {
+    assert(!rearmChoices.includes(near), `Black's re-arm offered ${near}, beside a king`);
+  }
+  assert(rearmChoices.includes('e6'), 'the restriction leaked onto a square nowhere near either king');
+  ok('king-adjacency also turns away a relocation and a post-trigger re-arm');
 }
 
 {

@@ -48,6 +48,25 @@ for (const level of ['easy', 'medium', 'hard']) {
   ok('free queen captured');
 }
 
+// 3b. avoidSquares: MottyBot's own active trap is not hidden from MottyBot.
+// A player reported the bot placing its own trap and then, on an ordinary
+// later turn, walking a piece onto it with no awareness at all — the search
+// had zero knowledge black holes even existed. Confirm the exclusion holds
+// even against the single most tempting move on the board (a free queen),
+// and that it never reduces the bot to no legal move at all.
+{
+  const fen = '7k/8/8/3q4/4P3/8/8/7K w - - 0 1';
+  const avoided = think(fen, 'hard', 'freeq-avoid', { blunderChance: 0, avoidSquares: ['d5'] });
+  assert(avoided && avoided.to !== 'd5',
+    `avoidSquares did not stop the bot walking onto its own trap, played ${avoided?.from}${avoided?.to}`);
+
+  const forcedFen = '8/8/8/8/8/8/5k2/7K w - - 0 1'; // White's king has exactly one legal move: h2
+  const forced = think(forcedFen, 'hard', 'forced-into-own-trap', { avoidSquares: ['h2'] });
+  assert(forced && forced.from === 'h1' && forced.to === 'h2',
+    'avoidSquares left the bot with no legal move when its own trap was the only option');
+  ok('MottyBot avoids walking a piece onto its own active trap, without ever being left with no legal move');
+}
+
 // 4. hard avoids losing its queen for nothing: after search, the chosen move
 // must not hang the queen to an immediate recapture that nets material loss.
 {

@@ -106,11 +106,12 @@ function requestWorker(payload) {
   });
 }
 
-async function requestBotMove(fen, level) {
+async function requestBotMove(fen, level, avoidSquares) {
   const result = await requestWorker({
     kind: 'move',
     fen,
     level,
+    avoidSquares,
     seed: `${state.match?.seed || 'game'}#bot-move#${state.match?.ply || 0}#${fen}`,
   });
   return result.move;
@@ -986,8 +987,11 @@ async function botLoop(serial) {
     let candidate;
     const planned = state.plannedBotMove?.fen === match.fen() ? state.plannedBotMove.move : null;
     state.plannedBotMove = null;
+    // MottyBot's own trap is not hidden information to MottyBot; keep the
+    // search from walking a piece onto ground it already knows is mined.
+    const ownHole = match.activeBlackHole(match.turn());
     try {
-      candidate = planned || await requestBotMove(match.fen(), state.bot.level);
+      candidate = planned || await requestBotMove(match.fen(), state.bot.level, ownHole ? [ownHole] : undefined);
     } catch {
       const legal = match.legalMoves();
       candidate = legal.length ? { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } : null;
@@ -1321,11 +1325,11 @@ function showRules() {
       <ol class="rule-list">
         <li><span class="rule-mark">1</span><span><b>You each hide one black hole.</b> Any empty square. You see yours, MottyBot never sees it, and you may both pick the same square without knowing.</span></li>
         <li><span class="rule-mark">2</span><span><b>It swallows anyone who lands on it, you included.</b> A piece has to land there; passing over it does nothing. Your own trap is no safer for you than it is for MottyBot.</span></li>
-        <li><span class="rule-mark">3</span><span><b>Whatever lands there is gone.</b> That includes a rook landing as you castle. If the move was a capture, both pieces leave the board: the one that was taken, and the one that took it.</span></li>
+        <li><span class="rule-mark">3</span><span><b>Whatever lands there is gone.</b> If the move was a capture, both pieces leave the board: the one that was taken, and the one that took it.</span></li>
         <li><span class="rule-mark">4</span><span><b>One trap, one victim.</b> The square turns ordinary the instant it fires, and anything may use it later. Only the player whose trap fired picks a new square; your opponent keeps theirs.</span></li>
         <li><span class="rule-mark">5</span><span><b>You can move your trap three times a game.</b> It costs your whole turn instead of a chess move, and you cannot do it while your king is in check.</span></li>
         <li><span class="rule-mark">6</span><span><b>Your king is not safe either.</b> If your king lands on any trap, yours or theirs, you lose on the spot. Checkmate, stalemate, resignation and the fifty-move rule all still work, and two bare kings keep playing, because a trap can still end it.</span></li>
-        <li><span class="rule-mark">7</span><span><b>Your very first black hole can't touch a king.</b> Not yours, not MottyBot's. Once it fires and you pick again, that limit is gone.</span></li>
+        <li><span class="rule-mark">7</span><span><b>A black hole can never touch a king.</b> Not yours, not MottyBot's. This holds every time you place one, all game: your first pick, a re-arm, or a relocation.</span></li>
         <li><span class="rule-mark">8</span><span><b>Your very first black hole can't sit in front of MottyBot's pawns.</b> No camping on the row its pieces are about to walk into. Once it fires and you pick again, that row opens up too.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
