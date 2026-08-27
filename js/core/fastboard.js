@@ -1,7 +1,7 @@
 // A fast 0x88 board used ONLY by the search.
 //
-// The authoritative game state stays in chess.js: it owns the rules, black-hole
-// effects and the result. But chess.js allocates an object per move and
+// The authoritative game state stays in chess.js: it owns the rules, the
+// weekly house effects and the result. But chess.js allocates an object per move and
 // rebuilds strings as it goes, which capped the search at roughly 1,500
 // positions a second, i.e. three plies. Three plies is a beginner.
 //

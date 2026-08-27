@@ -1,16 +1,16 @@
 // MottyBot lives in a worker so thinking never freezes the board.
 import { think } from './core/engine-ai.js';
-import { planStrategicBlackHole } from './core/hole-strategy.js';
+import { chooseIndex } from './core/exchange-brain.js';
 
 self.onmessage = (e) => {
-  const { id, kind = 'move', fen, level, seed, botColor, firstPick, avoidSquares } = e.data;
+  const { id, kind = 'move', fen, fens, level, seed, probeMs } = e.data;
   try {
-    if (kind === 'hole') {
-      const strategy = planStrategicBlackHole(fen, botColor, level, seed, { firstPick });
-      self.postMessage({ id, strategy });
+    if (kind === 'choose') {
+      const { index, scores } = chooseIndex(fens, level, seed, probeMs || 320);
+      self.postMessage({ id, index, scores });
       return;
     }
-    const move = think(fen, level, seed, { avoidSquares });
+    const move = think(fen, level, seed);
     self.postMessage({ id, move });
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message || err) });

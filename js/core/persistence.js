@@ -1,9 +1,10 @@
-// v8 allows both secret traps to share a square without forcing either owner
-// to make an extra selection. Existing v6/v7 games remain resumable.
-const ACTIVE_KEY = 'mv-active-v8';
-const LEGACY_ACTIVE_KEYS = ['mv-active-v7', 'mv-active-v6'];
+// v9 is the first Prisoner Exchange format. Older saves are Black Hole Chess
+// games; the rules that could replay them are gone, so they are discarded
+// rather than migrated.
+const ACTIVE_KEY = 'mv-active-v9';
+const OBSOLETE_ACTIVE_KEYS = ['mv-active-v8', 'mv-active-v7', 'mv-active-v6'];
 const STATS_KEY = 'mv-stats-v3';
-const RULES_KEY = 'mv-rules-seen-v7';
+const RULES_KEY = 'mv-rules-seen-v9';
 
 const read = (key, fallback) => {
   try {
@@ -15,25 +16,20 @@ const read = (key, fallback) => {
 };
 
 export function loadActive() {
-  const valid = (data) => data
-    && [6, 7, 8].includes(data.version)
+  const data = read(ACTIVE_KEY, null);
+  const valid = data
+    && data.version === 9
     && typeof data.seed === 'string'
     && Array.isArray(data.actions)
     && ['w', 'b'].includes(data.myColor)
     && ['easy', 'medium', 'hard'].includes(data.level);
-  const current = read(ACTIVE_KEY, null);
-  if (valid(current)) return current;
-  for (const key of LEGACY_ACTIVE_KEYS) {
-    const legacy = read(key, null);
-    if (valid(legacy)) return legacy;
-  }
-  return null;
+  return valid ? data : null;
 }
 
 export function saveActive({ seed, actions, myColor, level, startedAt = Date.now() }) {
   try {
     localStorage.setItem(ACTIVE_KEY, JSON.stringify({
-      version: 8,
+      version: 9,
       seed,
       actions,
       myColor,
@@ -41,14 +37,14 @@ export function saveActive({ seed, actions, myColor, level, startedAt = Date.now
       startedAt,
       savedAt: Date.now(),
     }));
-    for (const key of LEGACY_ACTIVE_KEYS) localStorage.removeItem(key);
+    for (const key of OBSOLETE_ACTIVE_KEYS) localStorage.removeItem(key);
   } catch { /* storage failure must never interrupt a game */ }
 }
 
 export function clearActive() {
   try {
     localStorage.removeItem(ACTIVE_KEY);
-    for (const key of LEGACY_ACTIVE_KEYS) localStorage.removeItem(key);
+    for (const key of OBSOLETE_ACTIVE_KEYS) localStorage.removeItem(key);
   } catch {}
 }
 

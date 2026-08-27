@@ -1,9 +1,9 @@
 {
   "name": "chess-mottys-version",
-  "version": "3.3.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Chess (Motty's Version). Secret one-use black holes remove pieces and may be relocated by spending a turn.",
+  "description": "Chess (Motty's Version). This week: Prisoner Exchange. Every piece remembers its starting square, and a matching capture can bring your dead back home.",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "test": "node test/run-all.mjs"

@@ -1,120 +1,97 @@
+// Random Prisoner Exchange games: every invariant that must hold across any
+// legal sequence of moves and resurrections, plus replay fidelity.
 import { Chess } from '../js/vendor/chess.js';
-import { BlackHoleMatch, replayMatch, firstBlackHoleEligibleSquares } from '../js/core/black-hole.js';
+import { ExchangeMatch, replayMatch } from '../js/core/exchange.js';
 import { makeRng, seedFromString } from '../js/core/rng.js';
 import { assert, ok, summary } from './helpers.mjs';
 
-const GAMES = Number(process.env.FUZZ_GAMES || 80);
-const MAX_PLIES = 180;
+const GAMES = Number(process.env.FUZZ_GAMES || 60);
+const MAX_PLIES = 200;
 let turns = 0;
-let triggers = 0;
-let repeatedSquares = 0;
-let kingFalls = 0;
-let relocations = 0;
-let sharedSquares = 0;
-let selfCatches = 0;
-let firstPicks = 0;
-let reopenedSameSquare = 0;
-let blockedByKingMove = 0;
+let offers = 0;
+let resurrections = 0;
+let promotions = 0;
+let castles = 0;
+let enPassants = 0;
+let endReasons = {};
 
 for (let game = 0; game < GAMES; game++) {
-  const match = new BlackHoleMatch(`fuzz-${game}`);
-  const mover = makeRng(seedFromString(`moves-${game}`));
-  match.selectFallbackBlackHole('w');
-  match.selectFallbackBlackHole('b');
+  const match = new ExchangeMatch(`fuzz-${game}`);
+  const rng = makeRng(seedFromString(`moves-${game}`));
 
   for (let step = 0; step < MAX_PLIES && !match.status().over; step++) {
-    const color = match.turn();
-    const relocationChoices = match.eligibleRelocationSquares(color);
-    let events = [];
-    if (relocationChoices.length && mover.next() < 0.055 && match.canRelocateBlackHole(color)) {
-      match.relocateBlackHole(color, relocationChoices[mover.int(relocationChoices.length)], { automatic: true });
-      relocations++;
+    const moves = match.legalMoves();
+    assert(moves.length > 0, `no legal moves in a live game ${game}:${step}`);
+    const chosen = moves[rng.int(moves.length)];
+    const options = match.resurrectionOptions(chosen);
+
+    if (options) {
+      offers++;
+      // Every offered home must be empty right now, and typed correctly.
+      for (const home of options.homes) {
+        assert(!match.chess.get(home), `offered home ${home} is occupied in game ${game}:${step}`);
+      }
+    }
+
+    if (options && rng.next() < 0.5) {
+      const home = options.homes[rng.int(options.homes.length)];
+      const before = new Chess(match.fen());
+      const deadBefore = match.dead[match.turn()].length;
+      const color = match.turn();
+      const event = match.resurrect({ from: chosen.from, to: chosen.to, promotion: chosen.promotion, home });
+      resurrections++;
+
+      // The victim survived, untouched.
+      const victimNow = match.chess.get(options.victimSquare);
+      const victimBefore = before.get(options.victimSquare);
+      assert(victimNow && victimNow.type === victimBefore.type && victimNow.color === victimBefore.color,
+        `spared victim vanished from ${options.victimSquare} in game ${game}:${step}`);
+      // The capturer never moved.
+      const capturerNow = match.chess.get(chosen.from);
+      assert(capturerNow && capturerNow.type === before.get(chosen.from).type,
+        `capturer left ${chosen.from} during a resurrection in game ${game}:${step}`);
+      // The returned piece stands on its home square.
+      const returned = match.chess.get(home);
+      assert(returned && returned.type === event.piece && returned.color === color,
+        `returned piece missing from ${home} in game ${game}:${step}`);
+      // One graveyard entry consumed, turn passed, clock reset, king safe.
+      assert(match.dead[color].length === deadBefore - 1,
+        `graveyard did not shrink by one in game ${game}:${step}`);
+      assert(match.turn() !== color, `resurrection did not pass the turn in game ${game}:${step}`);
+      assert(match.fen().split(' ')[4] === '0', `resurrection did not reset the clock in game ${game}:${step}`);
     } else {
-      const moves = match.legalMoves();
-      assert(moves.length > 0, `no legal moves in a live game ${game}:${step}`);
-      const chosen = moves[mover.int(moves.length)];
+      if (chosen.promotion) promotions++;
+      if (chosen.flags.includes('k') || chosen.flags.includes('q')) castles++;
+      if (chosen.flags.includes('e')) enPassants++;
       match.applyMove({ from: chosen.from, to: chosen.to, promotion: chosen.promotion });
-      events = match.resolveBlackHoleIfDue();
     }
     turns++;
 
-    // Normally one event. A shared square (both players secretly chose the
-    // same square) can produce two: one trap now catches anyone, including
-    // its own owner, so a single landing can spend both traps at once.
-    for (const event of events) {
-      triggers++;
-      if (event.kingLost) kingFalls++;
-      if (event.owner === event.victimColor) selfCatches++;
-      assert(event.reopened, `trigger ${game}:${step} did not mark its square reopened`);
-      assert(!match.chess.get(event.square), `arriving piece survived on ${event.square} in game ${game}`);
-      if (!event.kingLost) {
-        // The piece was just removed, so occupancy cannot be why the spent
-        // square would fail eligibility now; king-adjacency, re-checked
-        // against the CURRENT king positions, is the only thing that still
-        // could. A king that wandered next to this square since the trap
-        // was set correctly blocks an immediate re-arm there — it would be
-        // a fresh placement beside a king like any other.
-        if (match.eligibleBlackHoles(event.owner).includes(event.square)) reopenedSameSquare++;
-        else blockedByKingMove++;
-      }
-    }
-
-    if (match.status().over) break;
-    for (const color of ['w', 'b']) {
-      if (!match.selectionRequired(color)) continue;
-      const previous = match.lastTriggeredSquare(color);
-      if (previous && match.eligibleBlackHoles(color).includes(previous) && mover.next() < 0.5) {
-        match.selectBlackHole(color, previous, { automatic: true });
-        repeatedSquares++;
-      } else {
-        match.selectFallbackBlackHole(color);
-      }
-    }
-    assert(match.readyToPlay(), `replacement selection stalled game ${game}:${step}`);
-    const white = match.activeBlackHole('w');
-    const black = match.activeBlackHole('b');
-    if (white && white === black) sharedSquares++;
-    // A trap can only ever be placed on a square that was empty at the time,
-    // and now catches anyone who lands there afterward, its own owner
-    // included, so no piece of either color should ever be found resting on
-    // an active trap square.
-    assert(!white || !match.chess.get(white), `a piece is sitting on white's active black hole at ${white}`);
-    assert(!black || !match.chess.get(black), `a piece is sitting on black's active black hole at ${black}`);
-    assert(match.relocationsUsed('w') <= 3 && match.relocationsUsed('b') <= 3,
-      `relocation limit exceeded in game ${game}:${step}`);
+    // Piece-count conservation: board plus graveyards plus captured pawns
+    // always equals the 32 pieces the game started with.
+    let onBoard = 0;
+    for (const row of match.chess.board()) for (const cell of row) if (cell) onBoard++;
+    const buried = match.dead.w.length + match.dead.b.length;
+    assert(onBoard + buried === 32, `piece conservation broke: ${onBoard} on board + ${buried} dead in game ${game}:${step}`);
   }
 
-  for (const event of match.log) {
-    if (event.kind !== 'placement' || event.sequence !== 1) continue;
-    const boardAtPick = new Chess(event.fenAfter);
-    const stillAllowed = firstBlackHoleEligibleSquares(boardAtPick, event.color);
-    assert(stillAllowed.includes(event.square),
-      `first pick ${event.square} for ${event.color} in game ${game} violated the king-proximity/opponent-pawn-row limits`);
-    firstPicks++;
-  }
+  const finalStatus = match.status();
+  if (finalStatus.over) endReasons[finalStatus.reason] = (endReasons[finalStatus.reason] || 0) + 1;
+  else endReasons['unfinished'] = (endReasons['unfinished'] || 0) + 1;
 
   const restored = replayMatch(match.seed, match.serializedActions());
   assert(restored.fen() === match.fen(), `replay FEN drift in game ${game}`);
-  assert(restored.blackHolesTriggered() === match.blackHolesTriggered(), `replay trigger count drift in game ${game}`);
-  assert(restored.lastTriggeredSquare('w') === match.lastTriggeredSquare('w')
-    && restored.lastTriggeredSquare('b') === match.lastTriggeredSquare('b'), `replay spent-square drift in game ${game}`);
-  assert(restored.activeBlackHole('w') === match.activeBlackHole('w')
-    && restored.activeBlackHole('b') === match.activeBlackHole('b'), `replay active-hole drift in game ${game}`);
-  assert(restored.relocationsUsed('w') === match.relocationsUsed('w')
-    && restored.relocationsUsed('b') === match.relocationsUsed('b'), `replay relocation count drift in game ${game}`);
-  const actual = match.status();
-  const replayed = restored.status();
-  assert(actual.over === replayed.over && actual.winner === replayed.winner && actual.reason === replayed.reason,
-    `replay result drift in game ${game}`);
+  assert(JSON.stringify(restored.dead) === JSON.stringify(match.dead), `replay graveyard drift in game ${game}`);
+  assert(JSON.stringify([...restored.origins].sort()) === JSON.stringify([...match.origins].sort()),
+    `replay origin drift in game ${game}`);
+  const replayedStatus = restored.status();
+  assert(finalStatus.over === replayedStatus.over && finalStatus.winner === replayedStatus.winner
+    && finalStatus.reason === replayedStatus.reason, `replay result drift in game ${game}`);
 }
 
-console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${relocations} relocations, ${triggers} triggers, ${repeatedSquares} same-square re-arms, ${sharedSquares} shared-trap states, ${kingFalls} king falls, ${selfCatches} self-catches, ${blockedByKingMove} spent squares blocked by a nearby king`);
-assert(triggers >= Math.floor(GAMES / 2), `black holes triggered suspiciously rarely: ${triggers} across ${GAMES} games`);
-assert(repeatedSquares > 0, 'fuzz run never exercised a same-square rearm');
-assert(relocations > 0, 'fuzz run never exercised a voluntary relocation');
-assert(sharedSquares > 0, 'fuzz run never exercised overlapping active traps');
-assert(selfCatches > 0, 'fuzz run never exercised a trap catching its own owner');
-assert(firstPicks === GAMES * 2, `expected exactly two first picks per game, saw ${firstPicks} across ${GAMES} games`);
-assert(reopenedSameSquare > 0, 'fuzz run never confirmed a spent square reopening for an immediate re-arm');
-ok(`${GAMES} random games preserved relocation, one-use trap and replay invariants`);
+console.log(`  fuzz: ${GAMES} games, ${turns} turns, ${offers} offers, ${resurrections} resurrections, ${promotions} promotions, ${castles} castles, ${enPassants} en passants`);
+console.log(`  endings: ${JSON.stringify(endReasons)}`);
+assert(resurrections > 0, 'fuzz run never exercised a resurrection');
+assert(offers > resurrections, 'fuzz run never declined an offer');
+ok(`${GAMES} random games preserved victim, capturer, graveyard, conservation and replay invariants`);
 summary('fuzz.test.mjs');

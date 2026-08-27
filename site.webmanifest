@@ -1,7 +1,7 @@
 {
   "name": "Chess (Motty's Version)",
   "short_name": "Motty Chess",
-  "description": "Black Hole Chess with overlapping secret traps, reusable squares and tactical relocations.",
+  "description": "Prisoner Exchange chess: every piece remembers its starting square, and a matching capture can bring your dead back home.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#101315",

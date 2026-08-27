@@ -1,6 +1,6 @@
-// BoardView: renders the 8x8, pieces, the player's visible secret black hole,
-// drag + tap input, promotion, and the one-use trap animation. Pure view; the
-// match logic lives in core/black-hole.js.
+// BoardView: renders the 8x8, pieces, drag + tap input, promotion, and the
+// homecoming animation for a resurrected piece. Pure view; the match logic
+// lives in core/exchange.js.
 
 import { pieceUse } from './pieces.js';
 
@@ -17,9 +17,7 @@ export class BoardView {
     this.legalProvider = () => [];
     this.selected = null;
     this.drag = null;
-    this.holeSelector = null;
-    this.ownBlackHole = null;
-    this.spentSquare = null;
+    this.squareSelector = null;
     this.busy = false;             // true while an animation runs
     this.renderVersion = 0;        // invalidates animation work after a new position
     this.promotionCancel = null;
@@ -163,52 +161,34 @@ export class BoardView {
     this.busy = false;
   }
 
-  async animateBlackHole({ square, consumeOwnHole = true }) {
+  // A dead piece coming home: a burst on the home square, and the piece
+  // scales in from nothing where it started the game.
+  async animateResurrection({ square, color, type }) {
     const version = this.renderVersion;
     this.busy = true;
-    const piece = this.pieces.get(square);
     const cell = this.el.querySelector(`[data-sq="${square}"]`);
     const burst = document.createElement('div');
-    burst.className = 'hole-burst';
+    burst.className = 'return-burst';
     burst.setAttribute('aria-hidden', 'true');
     this.#place(burst, square);
     this.el.appendChild(burst);
-    cell?.classList.add('sq--imploding');
+    cell?.classList.add('sq--homecoming');
 
-    if (!this.reduceMotion && piece) {
+    const piece = this.#spawn(square, { color, type });
+    if (!this.reduceMotion) {
       const resting = piece.style.transform;
       const animation = piece.animate([
+        { transform: `${resting} scale(.05) rotate(-22deg)`, opacity: 0, filter: 'blur(2px)' },
+        { transform: `${resting} scale(1.14) rotate(4deg)`, opacity: 1, filter: 'blur(0)', offset: .72 },
         { transform: `${resting} scale(1) rotate(0deg)`, opacity: 1, filter: 'blur(0)' },
-        { transform: `${resting} scale(.64) rotate(8deg)`, opacity: .86, filter: 'blur(.3px)', offset: .58 },
-        { transform: `${resting} scale(.05) rotate(26deg)`, opacity: 0, filter: 'blur(2px)' },
-      ], { duration: 520, easing: 'cubic-bezier(.4,0,.8,.25)', fill: 'forwards' });
-      await Promise.race([animation.finished.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 760))]);
-    } else if (!this.reduceMotion) {
-      await wait(360);
+      ], { duration: 560, easing: 'cubic-bezier(.2,.9,.3,1.15)', fill: 'forwards' });
+      await Promise.race([animation.finished.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 820))]);
     }
 
-    if (version !== this.renderVersion) {
-      burst.remove();
-      cell?.classList.remove('sq--imploding', 'sq--reopening');
-      return;
-    }
-
-    if (piece) {
-      piece.remove();
-      this.pieces.delete(square);
-    }
     burst.remove();
-    // Two secret traps may share a square. If MottyBot's trap fired there,
-    // keep the player's still-active marker visible through the animation.
-    if (consumeOwnHole && this.ownBlackHole === square) this.ownBlackHole = null;
-    this.spentSquare = square;
-    this.#applySquareStates();
-    cell?.classList.remove('sq--imploding');
-    cell?.classList.add('sq--reopening');
-    if (!this.reduceMotion) await wait(240);
+    cell?.classList.remove('sq--homecoming');
     if (version !== this.renderVersion) return;
-    cell?.classList.remove('sq--reopening');
-    try { navigator.vibrate?.([18, 28, 24]); } catch {}
+    try { navigator.vibrate?.([24, 20, 18]); } catch {}
     this.busy = false;
   }
 
@@ -235,18 +215,10 @@ export class BoardView {
     this.#clearOverlays('last:');
     if (from) { this.#overlay(`last:${from}`, from, 'overlay--hl'); this.#overlay(`last:${to}`, to, 'overlay--hl'); }
   }
-  setBlackHoleState({ own = null, spent = null } = {}) {
-    this.ownBlackHole = own;
-    this.spentSquare = spent;
-    this.#applySquareStates();
-  }
   #applySquareStates() {
     for (const cell of this.el.querySelectorAll('.sq')) {
       const square = cell.dataset.sq;
-      cell.classList.toggle('sq--own-hole', square === this.ownBlackHole);
-      cell.classList.toggle('sq--hole-choice', !!this.holeSelector?.eligible.has(square));
-      cell.classList.toggle('sq--repeat-choice', square === this.holeSelector?.previousSquare);
-      cell.classList.toggle('sq--spent', square === this.spentSquare);
+      cell.classList.toggle('sq--home-choice', !!this.squareSelector?.eligible.has(square));
     }
     this.#updateSquareLabels();
   }
@@ -281,7 +253,7 @@ export class BoardView {
   /* ---------- input ---------- */
   setInteractive(color, legalProvider) {
     this.#cancelPromotion();
-    this.holeSelector = null;
+    this.squareSelector = null;
     this.interactiveColor = color;
     this.legalProvider = legalProvider || (() => []);
     this.#select(null);
@@ -294,29 +266,26 @@ export class BoardView {
     this.#applySquareStates();
   }
 
-  setHoleSelection(squares, onSelect, {
-    previousSquare = null,
-    instruction = 'Choose an empty square for your secret black hole. Use arrow keys and press Enter to place it.',
-    choiceLabel = 'available for your black hole',
+  // Offer a set of squares to tap (used to pick which home square a
+  // returning piece lands on).
+  setSquareSelection(squares, onSelect, {
+    instruction = 'Choose a highlighted square. Use arrow keys and press Enter to select, or Escape to cancel.',
+    choiceLabel = 'available',
     onCancel = null,
   } = {}) {
     this.#cancelPromotion();
     this.interactiveColor = null;
     this.legalProvider = () => [];
     this.#select(null);
-    this.holeSelector = {
+    this.squareSelector = {
       eligible: new Set(squares || []),
       onSelect: onSelect || (() => {}),
-      previousSquare,
       choiceLabel,
       onCancel,
     };
     for (const [, elm] of this.pieces) elm.classList.remove('piece--draggable');
-    if (previousSquare && this.holeSelector.eligible.has(previousSquare)) {
-      this.focusSq = previousSquare;
-      this.#syncFocus();
-    } else if (!this.holeSelector.eligible.has(this.focusSq)) {
-      this.focusSq = this.holeSelector.eligible.values().next().value || this.focusSq;
+    if (!this.squareSelector.eligible.has(this.focusSq)) {
+      this.focusSq = this.squareSelector.eligible.values().next().value || this.focusSq;
       this.#syncFocus();
     }
     this.el.setAttribute('aria-disabled', 'false');
@@ -331,17 +300,22 @@ export class BoardView {
     this.el.addEventListener('pointerup', (e) => this.#up(e));
     this.el.addEventListener('pointercancel', () => this.#cancelDrag());
     this.el.addEventListener('click', (e) => {
-      if (!this.holeSelector || this.busy) return;
+      if (!this.squareSelector || this.busy) return;
       const square = this.#squareFromEvent(e);
       if (square) this.#activateSquare(square);
     });
   }
   #bindKeyboard() {
     this.el.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.holeSelector?.onCancel && !this.busy) {
+      // Keys steer the board only when the board itself is focused. The
+      // promotion popup's buttons live inside the board element, and
+      // swallowing their Enter/Space here made promotion unreachable by
+      // keyboard.
+      if (e.target !== this.el) return;
+      if (e.key === 'Escape' && this.squareSelector?.onCancel && !this.busy) {
         e.preventDefault();
-        const callback = this.holeSelector.onCancel;
-        this.holeSelector = null;
+        const callback = this.squareSelector.onCancel;
+        this.squareSelector = null;
         this.#applySquareStates();
         callback();
         return;
@@ -358,7 +332,7 @@ export class BoardView {
         this.#syncFocus();
         return;
       }
-      if ((e.key === 'Enter' || e.key === ' ') && (this.interactiveColor || this.holeSelector) && !this.busy) {
+      if ((e.key === 'Enter' || e.key === ' ') && (this.interactiveColor || this.squareSelector) && !this.busy) {
         e.preventDefault();
         this.#activateSquare(this.focusSq);
       }
@@ -376,19 +350,15 @@ export class BoardView {
       const piece = this.pieces.get(sq.dataset.sq);
       const suffix = piece ? `${piece.dataset.color === 'w' ? 'white' : 'black'} ${names[piece.dataset.type]}` : 'empty';
       const selected = this.selected === sq.dataset.sq ? ', selected' : '';
-      const ownHole = this.ownBlackHole === sq.dataset.sq ? ', your active black hole' : '';
-      const choice = this.holeSelector?.eligible.has(sq.dataset.sq) ? `, ${this.holeSelector.choiceLabel}` : '';
-      const repeat = this.holeSelector?.previousSquare === sq.dataset.sq
-        ? ', previous black-hole square, available again'
-        : this.spentSquare === sq.dataset.sq ? ', black hole spent, square is open again' : '';
-      sq.setAttribute('aria-label', `${sq.dataset.sq}, ${suffix}${ownHole}${choice}${repeat}${selected}`);
+      const choice = this.squareSelector?.eligible.has(sq.dataset.sq) ? `, ${this.squareSelector.choiceLabel}` : '';
+      sq.setAttribute('aria-label', `${sq.dataset.sq}, ${suffix}${choice}${selected}`);
     }
   }
   #activateSquare(sq) {
-    if (this.holeSelector) {
-      if (!this.holeSelector.eligible.has(sq)) return;
-      const callback = this.holeSelector.onSelect;
-      this.holeSelector = null;
+    if (this.squareSelector) {
+      if (!this.squareSelector.eligible.has(sq)) return;
+      const callback = this.squareSelector.onSelect;
+      this.squareSelector = null;
       this.#applySquareStates();
       callback(sq);
       return;
@@ -410,7 +380,7 @@ export class BoardView {
     return this.rcToSquare(row, col);
   }
   #down(e) {
-    if (this.holeSelector || !this.interactiveColor || this.busy) return;
+    if (this.squareSelector || !this.interactiveColor || this.busy) return;
     const sq = this.#squareFromEvent(e);
     if (!sq) return;
     const elm = this.pieces.get(sq);
@@ -491,9 +461,11 @@ export class BoardView {
       const goingDown = row === 0;
       box.style.left = `${col * 12.5}%`;
       box.style[goingDown ? 'top' : 'bottom'] = '0';
+      const promoNames = { q: 'queen', n: 'knight', r: 'rook', b: 'bishop' };
       for (const t of ['q', 'n', 'r', 'b']) {
         const b = document.createElement('button');
         b.type = 'button';
+        b.setAttribute('aria-label', `Promote to ${promoNames[t]}`);
         b.innerHTML = pieceUse(color, t);
         b.addEventListener('pointerdown', (e) => e.stopPropagation());
         b.addEventListener('click', (e) => { e.stopPropagation(); finish(t); });
@@ -502,6 +474,7 @@ export class BoardView {
       const x = document.createElement('button');
       x.type = 'button';
       x.className = 'promo__close';
+      x.setAttribute('aria-label', 'Cancel promotion');
       x.textContent = '×';
       x.addEventListener('pointerdown', (e) => e.stopPropagation());
       x.addEventListener('click', (e) => { e.stopPropagation(); finish(null); });
@@ -524,9 +497,9 @@ export class BoardView {
       this.drag = null;
     }
     this.#cancelPromotion();
-    for (const transient of this.el.querySelectorAll('.hole-burst, .promo')) transient.remove();
-    for (const cell of this.el.querySelectorAll('.sq--imploding, .sq--reopening')) {
-      cell.classList.remove('sq--imploding', 'sq--reopening');
+    for (const transient of this.el.querySelectorAll('.return-burst, .promo')) transient.remove();
+    for (const cell of this.el.querySelectorAll('.sq--homecoming')) {
+      cell.classList.remove('sq--homecoming');
     }
   }
 }

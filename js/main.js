@@ -1,5 +1,5 @@
 import { Chess } from './vendor/chess.js';
-import { BlackHoleMatch, START_FEN, replayMatch } from './core/black-hole.js';
+import { ExchangeMatch, START_FEN, replayMatch, resurrectionFen } from './core/exchange.js';
 import { parseFen } from './core/fen.js';
 import { randomSeed } from './core/rng.js';
 import { loadActive, saveActive, clearActive, loadStats, recordResult, markRulesSeen } from './core/persistence.js';
@@ -14,19 +14,18 @@ const $ = (id) => document.getElementById(id);
 const panel = $('panel');
 const PIECE_NAMES = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
 const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
-const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const BOTS = {
   easy: {
     name: 'MottyBot', label: 'Casual', level: 'easy', minThink: 600,
-    blurb: 'Makes a quick plan, but sometimes backs the wrong move or trap.',
+    blurb: 'Makes a quick plan, but sometimes backs the wrong move or trade.',
   },
   medium: {
     name: 'MottyBot', label: 'Club', level: 'medium', minThink: 900,
-    blurb: 'Reads farther ahead and usually punishes a loose piece or risky square.',
+    blurb: 'Reads farther ahead and usually punishes a loose piece or a bad trade.',
   },
   hard: {
     name: 'MottyBot', label: 'Expert', level: 'hard', minThink: 1200,
-    blurb: 'Searches as deep as its clock allows and never blunders on purpose.',
+    blurb: 'Searches as deep as its clock allows and weighs every homecoming.',
   },
 };
 
@@ -41,7 +40,6 @@ const state = {
   resultRecorded: false,
   result: null,
   replay: null,
-  plannedBotMove: null,
 };
 
 const board = new BoardView($('board'), { onUserMove: handleUserMove });
@@ -106,28 +104,27 @@ function requestWorker(payload) {
   });
 }
 
-async function requestBotMove(fen, level, avoidSquares) {
+async function requestBotMove(fen, level) {
   const result = await requestWorker({
     kind: 'move',
     fen,
     level,
-    avoidSquares,
     seed: `${state.match?.seed || 'game'}#bot-move#${state.match?.ply || 0}#${fen}`,
   });
   return result.move;
 }
 
-async function requestBotBlackHole(fen, botColor, level) {
-  const sequence = (state.match?.selectionCount?.[botColor] || 0) + 1;
-  const result = await requestWorker({
-    kind: 'hole',
-    fen,
-    botColor,
-    level,
-    firstPick: sequence === 1,
-    seed: `${state.match?.seed || 'game'}#bot-hole#${botColor}#${sequence}#${state.match?.ply || 0}`,
+// Ask MottyBot to compare candidate positions: the plain chess move first,
+// then each possible homecoming. Ties keep the plain move.
+async function requestBotChoice(fens) {
+  const probeMs = state.bot.level === 'hard' ? 420 : state.bot.level === 'medium' ? 260 : 140;
+  return requestWorker({
+    kind: 'choose',
+    fens,
+    level: state.bot.level,
+    probeMs,
+    seed: `${state.match?.seed || 'game'}#choose#${state.match?.ply || 0}`,
   });
-  return result.strategy;
 }
 
 /* Shared helpers */
@@ -157,10 +154,6 @@ function kingSquare(color, fen = state.match?.fen()) {
 function syncBoard() {
   if (!state.match) return;
   board.verify(positionMap());
-  board.setBlackHoleState({
-    own: state.match.activeBlackHole(state.myColor),
-    spent: null,
-  });
 }
 
 function updateCheckMark(fen = state.match?.fen()) {
@@ -170,7 +163,7 @@ function updateCheckMark(fen = state.match?.fen()) {
 }
 
 function setThinking(on) { $('top-thinking').hidden = !on; }
-function setPlayerAction(label = null, { phase = 'turn', title = '', copy = '', onCancel = null } = {}) {
+function setPlayerAction(label = null, { phase = 'turn', title = '', copy = '', onCancel = null, buttons = [] } = {}) {
   const tag = $('turn-tag');
   tag.hidden = !label;
   tag.textContent = label || 'Your move';
@@ -184,6 +177,17 @@ function setPlayerAction(label = null, { phase = 'turn', title = '', copy = '', 
   const cancel = $('board-action-cancel');
   cancel.hidden = typeof onCancel !== 'function';
   cancel.onclick = typeof onCancel === 'function' ? onCancel : null;
+  const bar = $('board-action-buttons');
+  bar.innerHTML = '';
+  bar.hidden = !buttons.length;
+  for (const item of buttons) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `btn ${item.kind || 'btn--secondary'}`;
+    button.textContent = item.label;
+    button.onclick = item.onClick;
+    bar.appendChild(button);
+  }
 }
 function setYourTurn(on) { setPlayerAction(on ? 'Your move' : null); }
 function focusBoard({ keepActionVisible = false } = {}) {
@@ -240,26 +244,38 @@ function reactToMove(move, byBot) {
   else if (move.captured) showTaunt(pickTaunt('playerCapture'));
 }
 
-function reactToBlackHole(event) {
-  if (!event || !['playing', 'placing'].includes(state.screen)) return;
-  // A trap now catches its own owner too, so MottyBot needs to know not just
-  // who lost a piece but whose trap actually did it, or its trash talk would
-  // take credit for traps it never set.
-  const victimIsMe = event.victimColor === state.myColor;
-  const ownTrap = event.owner === event.victimColor;
-  const category = victimIsMe
-    ? (ownTrap ? 'holeHitYouByYou' : 'holeHitYouByMe')
-    : (ownTrap ? 'holeHitMeByMe' : 'holeHitMeByYou');
-  showTaunt(pickTaunt(category, { chance: 0.65, minGapMs: 7000 }));
+function setTradeStatus({ phase = 'idle', title, copy, route = '' }) {
+  const strip = $('trade-strip');
+  strip.dataset.phase = phase;
+  $('trade-title').textContent = title;
+  $('trade-copy').textContent = copy || '';
+  $('trade-route').textContent = route;
+  $('trade-route').hidden = !route;
 }
 
-function setHoleStatus({ phase = 'idle', title, copy, route = '' }) {
-  const strip = $('magic-strip');
-  strip.dataset.phase = phase;
-  $('magic-title').textContent = title;
-  $('magic-copy').textContent = copy || '';
-  $('magic-route').textContent = route;
-  $('magic-route').hidden = !route;
+// The idle strip: what is waiting in the player's graveyard, if anything.
+function showTradeStatus() {
+  const match = state.match;
+  if (!match) return;
+  const waiting = match.graveyard(state.myColor);
+  if (!waiting.length) {
+    setTradeStatus({
+      phase: 'idle',
+      title: 'Every piece remembers home',
+      copy: 'When a knight, bishop, rook or queen of yours falls, capture a matching enemy piece and you may bring yours back instead.',
+    });
+    return;
+  }
+  const names = waiting.map((entry) => PIECE_NAMES[entry.type]);
+  const openCount = waiting.filter((entry) => entry.open.length).length;
+  setTradeStatus({
+    phase: 'armed',
+    title: `Waiting to come home: ${names.join(', ')}`,
+    copy: openCount
+      ? 'Capture a matching enemy piece and you may bring yours back instead of taking theirs.'
+      : 'Every home square is blocked right now. Clear it and a matching capture brings yours back.',
+    route: `${waiting.length} fallen`,
+  });
 }
 
 function renderCaptured() {
@@ -331,14 +347,14 @@ function panelHome() {
 
   panel.innerHTML = `
     <div class="desk-head">
-      <h1>One square is lying to you.</h1>
-      <p>You and MottyBot each hide a one-use black hole. Land on one, even your own, and the piece is gone. Then the square opens again.</p>
+      <h1>Nothing you lose is gone for good.</h1>
+      <p>This week's rules: Prisoner Exchange. Every piece remembers its starting square, and a matching capture can bring your dead back home.</p>
     </div>
     <div class="desk-body">
       ${shared ? `
         <div class="resume-card">
           <strong>Someone sent you this board</strong>
-          <p>MottyBot opens with its black hole on the same square it used against them, at ${escapeHTML(BOTS[shared.level].label.toLowerCase())} difficulty. Where you hide yours is still yours to pick.</p>
+          <p>The same colors and ${escapeHTML(BOTS[shared.level].label.toLowerCase())} difficulty they played. Beat their MottyBot.</p>
           <button class="btn btn--magic" id="play-shared">Play this challenge</button>
         </div>` : ''}
       ${active ? `
@@ -350,15 +366,15 @@ function panelHome() {
             <button class="btn btn--quiet" id="discard-game">Discard</button>
           </div>
         </div>` : ''}
-      <div class="rule-sequence" role="group" aria-label="How a turn works">
-        <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Hide one black hole</strong><p>Any empty square. You see yours, MottyBot never does.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Play legal chess</strong><p>Whatever lands on your square is gone, even your own piece. The square reopens at once.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>One fall, one re-arm</strong><p>Only the player whose trap fired picks a new square.</p></div></div>
+      <div class="rule-sequence" role="group" aria-label="How the exchange works">
+        <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Lose a piece</strong><p>It waits in your graveyard, remembering the square it started on.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Capture its twin</strong><p>Take an enemy piece of the same kind, anywhere on the board.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Or bring yours home</strong><p>Undo the take: their piece lives, and yours returns to its starting square.</p></div></div>
       </div>
       <div class="button-stack">
         <button class="btn btn--primary" id="choose-game">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18.5h14M8 18.5l1-7h6l1 7M9 7.5h6M10 4h4v3.5H10Z"/></svg>
-          Play Black Hole Chess
+          Play Prisoner Exchange
         </button>
       </div>
       ${stats.played ? `
@@ -391,7 +407,7 @@ function panelSetup() {
   let level = 'medium';
   let color = 'w';
   panel.innerHTML = `
-    <div class="desk-head"><h1>Choose your match.</h1><p>MottyBot cannot see your secret square. Higher levels make stronger chess moves and sharper trap choices.</p></div>
+    <div class="desk-head"><h1>Choose your match.</h1><p>Higher levels make stronger chess moves and judge every homecoming more sharply.</p></div>
     <div class="desk-body">
       <p class="section-title">Difficulty</p>
       <div class="difficulty-list" id="difficulty-list">
@@ -434,16 +450,12 @@ function panelSetup() {
 function panelPlaying() {
   setSkipTarget('board', 'Skip to the board');
   panel.className = 'matchdesk';
-  const ownHole = state.match?.activeBlackHole(state.myColor);
   panel.innerHTML = `
     <div class="desk-head">
       <div class="match-title"><h2>${escapeHTML(state.bot.name)}</h2><span class="difficulty-label">${escapeHTML(state.bot.label)} difficulty</span></div>
-      <p>Your black hole is ${ownHole ? `<strong>${escapeHTML(ownHole)}</strong>` : 'waiting to be placed'}. MottyBot's is hidden.</p>
+      <p>Capture a piece that matches one of your dead, and you may bring yours home instead of taking theirs.</p>
     </div>
-    <div class="relocate-action" role="group" aria-label="Black-hole relocation">
-      <button class="btn btn--magic" id="relocate-hole" type="button" aria-describedby="relocate-status">Move black hole</button>
-      <span id="relocate-status"></span>
-    </div>
+    <div class="graveyards" id="graveyards"></div>
     <div class="desk-body desk-body--moves"><div class="move-list" id="move-list"></div></div>
     <div class="desk-footer">
       <button class="btn btn--danger" id="resign-game">Resign</button>
@@ -451,9 +463,8 @@ function panelPlaying() {
     </div>`;
   $('resign-game').onclick = confirmResign;
   $('game-rules').onclick = showRules;
-  $('relocate-hole').onclick = beginPlayerRelocation;
+  renderGraveyards();
   renderMoveList();
-  updateRelocateControl();
 }
 
 function panelPostGame() {
@@ -462,7 +473,7 @@ function panelPostGame() {
   panel.innerHTML = `
     <div class="desk-head">
       <div class="match-title"><h2>Final position</h2><span class="difficulty-label">${escapeHTML(state.bot.label)} difficulty</span></div>
-      <p>The moves, relocations, secret choices and every one-use trap remain available for review.</p>
+      <p>Every move and every homecoming remains available for review.</p>
     </div>
     <div class="desk-body desk-body--moves"><div class="move-list" id="move-list"></div></div>
     <div class="desk-footer">
@@ -474,36 +485,46 @@ function panelPostGame() {
   $('post-new').onclick = panelSetup;
 }
 
+// The two graveyards, in full view: this variant has no secrets.
+function renderGraveyards() {
+  const wrap = $('graveyards');
+  if (!wrap || !state.match) return;
+  const row = (label, color) => {
+    const waiting = state.match.graveyard(color);
+    const items = waiting.length
+      ? `<ul>${waiting.map((entry) => {
+        const open = entry.open.length > 0;
+        const where = open ? `${entry.open.join(' or ')} open` : `${entry.homes.join(' and ')} blocked`;
+        return `<li class="${open ? 'is-open' : ''}" aria-label="${PIECE_NAMES[entry.type]}, ${where}">${pieceUse(color, entry.type)}<span>${where}</span></li>`;
+      }).join('')}</ul>`
+      : '<span class="empty-note">Nothing waiting</span>';
+    return `<div class="graveyard-row"><strong>${label}</strong>${items}</div>`;
+  };
+  wrap.innerHTML = row('Your fallen', state.myColor) + row("MottyBot's", state.myColor === 'w' ? 'b' : 'w');
+}
+
 function renderMoveList() {
   const wrap = $('move-list');
   if (!wrap || !state.match) return;
-  const log = state.match.log;
   const blocks = [];
-  for (let i = 0; i < log.length; i++) {
-    const entry = log[i];
+  for (const entry of state.match.log) {
+    const number = Math.floor(entry.ply / 2) + 1;
+    const marker = `${number}${entry.color === 'w' ? '.' : '…'}`;
+    const side = entry.color === state.myColor ? 'You' : 'MottyBot';
     if (entry.kind === 'move') {
-      // Usually at most one trigger follows a move. A square shared by both
-      // secret traps can produce two: the landing spends both at once, so
-      // every consecutive black-hole entry belongs to this move, not just
-      // the first.
-      const triggers = [];
-      for (let j = i + 1; log[j]?.kind === 'black-hole'; j++) triggers.push(log[j]);
-      const number = Math.floor(entry.ply / 2) + 1;
       blocks.push(`
         <div class="turn-record">
-          <div class="move-line"><span class="move-number">${number}${entry.color === 'w' ? '.' : '…'}</span><span class="move-san">${escapeHTML(entry.san)}</span><span class="move-side">${entry.color === state.myColor ? 'You' : 'MottyBot'}</span></div>
-          ${triggers.map((trigger) => `<div class="hole-line">${capitalize(PIECE_NAMES[trigger.piece.type])} lost at ${trigger.square}. Square reopened.</div>`).join('')}
+          <div class="move-line"><span class="move-number">${marker}</span><span class="move-san">${escapeHTML(entry.san)}</span><span class="move-side">${side}</span></div>
         </div>`);
-    } else if (entry.kind === 'relocation') {
-      const number = Math.floor(entry.ply / 2) + 1;
+    } else if (entry.kind === 'resurrect') {
       blocks.push(`
-        <div class="turn-record turn-record--relocation">
-          <div class="move-line"><span class="move-number">${number}${entry.color === 'w' ? '.' : '…'}</span><span class="move-san">Black hole ${entry.from} to ${entry.to}</span><span class="move-side">${entry.color === state.myColor ? 'You' : 'MottyBot'}</span></div>
-          <div class="hole-line">Turn used. ${entry.remaining} ${entry.remaining === 1 ? 'change' : 'changes'} left.</div>
+        <div class="turn-record turn-record--return">
+          <div class="move-line"><span class="move-number">${marker}</span><span class="move-san">${capitalize(PIECE_NAMES[entry.piece])} home to ${entry.home}</span><span class="move-side">${side}</span></div>
+          <div class="trade-line">Spared the ${PIECE_NAMES[entry.declined.victimType]} on ${entry.declined.victimSquare}.</div>
         </div>`);
     }
   }
-  wrap.innerHTML = blocks.length ? blocks.join('') : '<div class="empty-log">Your moves, relocations and every triggered black hole will appear here.</div>';
+  wrap.innerHTML = blocks.length ? blocks.join('') : '<div class="empty-log">Your moves and every homecoming will appear here.</div>';
   const scroller = wrap.closest('.desk-body--moves');
   if (scroller) scroller.scrollTop = scroller.scrollHeight;
 }
@@ -515,10 +536,6 @@ function configureBoardForMatch() {
   board.setOrientation(state.myColor);
   board.setPosition(positionMap());
   board.setLastMove(null);
-  board.setBlackHoleState({
-    own: state.match?.activeBlackHole(state.myColor),
-    spent: null,
-  });
   updateCheckMark();
   $('top-name').textContent = state.bot.name;
   $('top-detail').textContent = `${state.bot.label} difficulty`;
@@ -529,330 +546,47 @@ function configureBoardForMatch() {
 
 function opposingColor(color) { return color === 'w' ? 'b' : 'w'; }
 
-function updateRelocateControl() {
-  const button = $('relocate-hole');
-  const status = $('relocate-status');
-  if (!button || !status || !state.match) return;
-
-  const match = state.match;
-  const remaining = match.relocationsRemaining(state.myColor);
-  const myTurn = state.screen === 'playing' && !state.over && match.turn() === state.myColor;
-  const inCheck = myTurn && match.status().check;
-  const hasAlternative = match.eligibleRelocationSquares(state.myColor).length > 0;
-  const available = myTurn && match.canRelocateBlackHole(state.myColor);
-
-  button.disabled = !available;
-  if (remaining <= 0) status.textContent = 'All 3 changes used';
-  else if (!match.activeBlackHole(state.myColor)) status.textContent = 'Waiting for your next trap';
-  else if (inCheck) status.textContent = `Answer check first · ${remaining} left`;
-  else if (!hasAlternative) status.textContent = `No other empty square · ${remaining} left`;
-  else if (!myTurn) status.textContent = `Available on your turn · ${remaining} left`;
-  else status.textContent = `Uses this turn · ${remaining} left`;
-}
-
-function panelHolePlacement({ initial = false, previousSquare = null } = {}) {
-  setSkipTarget('board', 'Skip to black-hole selection');
-  panel.className = 'matchdesk matchdesk--placing';
-  panel.innerHTML = `
-    <div class="desk-head">
-      <h2>${initial ? 'Hide your black hole.' : 'Replace your black hole.'}</h2>
-      <p>Select any empty square directly on the board. MottyBot will not be shown your choice.</p>
-    </div>
-    <div class="desk-body">
-      <div class="placement-note">
-        <strong>${initial ? 'Your trap works once.' : `${previousSquare} is open again.`}</strong>
-        <p>${initial ? 'When MottyBot lands on it, that piece disappears. Later, you may also spend up to three turns moving an active trap.' : `You may arm ${previousSquare} again or choose any other empty square.`}</p>
-      </div>
-    </div>`;
-}
-
-function panelRelocation(currentSquare, remaining) {
-  setSkipTarget('board', 'Skip to black-hole relocation');
-  panel.className = 'matchdesk matchdesk--placing';
-  panel.innerHTML = `
-    <div class="desk-head">
-      <h2>Choose a new square.</h2>
-      <p>Move your black hole from <strong>${escapeHTML(currentSquare)}</strong> to a different empty square.</p>
-    </div>
-    <div class="desk-body">
-      <div class="placement-note">
-        <strong>This uses your whole turn.</strong>
-        <p>The change counts only after you choose a square. You will have ${remaining - 1} ${remaining - 1 === 1 ? 'change' : 'changes'} left.</p>
-      </div>
-    </div>
-    <div class="desk-footer"><button class="btn btn--secondary" id="cancel-relocation" type="button">Cancel</button></div>`;
-}
-
-function showArmedHoleStatus() {
-  const own = state.match?.activeBlackHole(state.myColor);
-  const remaining = state.match?.relocationsRemaining(state.myColor) || 0;
-  setHoleStatus({
-    phase: 'armed',
-    title: own ? 'Your black hole is armed' : 'No black hole can be placed',
-    copy: own
-      ? remaining
-        ? `Moving it uses your turn. ${remaining} of 3 optional changes remain.`
-        : 'All three optional changes are used. Every spent square still returns to normal.'
-      : 'There are no eligible empty squares left.',
-    route: own || '',
-  });
-}
-
-function beginPlayerRelocation() {
-  const match = state.match;
-  const serial = state.serial;
-  if (!match || state.over || state.animating || state.screen !== 'playing' || !match.canRelocateBlackHole(state.myColor)) {
-    sound.illegal();
-    updateRelocateControl();
-    return;
-  }
-
-  const currentSquare = match.activeBlackHole(state.myColor);
-  const remaining = match.relocationsRemaining(state.myColor);
-  const choices = match.eligibleRelocationSquares(state.myColor);
-  state.screen = 'relocating';
-  clearTaunt();
-  panelRelocation(currentSquare, remaining);
-  board.setBlackHoleState({ own: currentSquare, spent: null });
-
-  const cancel = () => {
-    if (state.serial !== serial || state.match !== match || state.over || state.screen !== 'relocating') return;
-    state.screen = 'playing';
-    syncBoard();
-    panelPlaying();
-    showArmedHoleStatus();
-    botLoop(serial);
-    announce('Black-hole relocation canceled. Your turn continues.');
-    focusBoard();
-  };
-
-  setPlayerAction('Choose new square', {
-    phase: 'selecting',
-    title: 'Move your black hole',
-    copy: 'Tap a marked empty square. This uses your turn.',
-    onCancel: cancel,
-  });
-
-  const handleSelection = async (square) => {
-    if (state.serial !== serial || state.match !== match || state.over || state.screen !== 'relocating') return;
-    let relocation;
-    try {
-      relocation = match.relocateBlackHole(state.myColor, square);
-    } catch {
-      sound.illegal();
-      board.setHoleSelection(choices, handleSelection, {
-        instruction: 'Choose a different empty square for your black hole. Use arrow keys and press Enter to move it, or Escape to cancel.',
-        choiceLabel: 'available for black-hole relocation',
-        onCancel: cancel,
-      });
-      return;
-    }
-
-    state.plannedBotMove = null;
-    state.screen = 'playing';
-    syncBoard();
-    panelPlaying();
-    setYourTurn(false);
-    board.setInteractive(null);
-    sound.move();
-    setHoleStatus({
-      phase: 'armed',
-      title: `Your black hole moved to ${square}`,
-      copy: `Your turn is spent. ${relocation.remaining} ${relocation.remaining === 1 ? 'change remains' : 'changes remain'}.`,
-      route: square,
-    });
-    persistGame();
-    announce(`Your black hole moved from ${relocation.from} to ${square}. Your turn is over.`);
-
-    if (match.status().over) {
-      endGame();
-      return;
-    }
-    if (state.serial !== serial || state.match !== match || state.over) return;
-    persistGame();
-    botLoop(serial);
-  };
-
-  $('cancel-relocation').onclick = cancel;
-  board.setHoleSelection(choices, handleSelection, {
-    instruction: 'Choose a different empty square for your black hole. Use arrow keys and press Enter to move it, or Escape to cancel.',
-    choiceLabel: 'available for black-hole relocation',
-    onCancel: cancel,
-  });
-  setHoleStatus({
-    phase: 'selecting',
-    title: 'Move your black hole',
-    copy: `Choose a different empty square or cancel. Selecting a square ends your turn.`,
-    route: `${remaining} left`,
-  });
-  announce(`Choose a different empty square for your black hole. You have ${remaining} changes left. Canceling keeps your turn.`);
-  focusBoard({ keepActionVisible: true });
-}
-
-async function chooseBotBlackHole() {
-  const match = state.match;
-  const serial = state.serial;
-  const botColor = opposingColor(state.myColor);
-  if (!match || !match.selectionRequired(botColor) || state.over) return null;
-
-  setYourTurn(false);
-  setThinking(true);
-  board.setInteractive(null);
-  setHoleStatus({
-    phase: 'selecting',
-    title: 'MottyBot is choosing a trap',
-    copy: `${state.bot.label} MottyBot is reading the position before it hides the next one.`,
-  });
-  announce('MottyBot is choosing its hidden black hole.');
-
-  let strategy = null;
-  try {
-    strategy = await requestBotBlackHole(match.fen(), botColor, state.bot.level);
-  } catch {
-    strategy = null;
-  }
-  if (state.serial !== serial || state.match !== match || state.over) return null;
-
-  const eligible = new Set(match.eligibleBlackHoles(botColor));
-  const ranked = strategy?.candidates?.map((item) => item.square) || [];
-  const square = ranked.find((candidate) => eligible.has(candidate));
-  let placement = null;
-  try {
-    placement = square
-      ? match.selectBlackHole(botColor, square, { automatic: true })
-      : match.selectFallbackBlackHole(botColor);
-  } catch {
-    placement = match.selectFallbackBlackHole(botColor);
-  }
-
-  state.plannedBotMove = strategy?.plannedMove && match.turn() === botColor
-    ? { fen: match.fen(), move: strategy.plannedMove }
-    : null;
-  setThinking(false);
-  if (placement) announce('MottyBot chose its own hidden black hole.');
-  return placement;
-}
-
-function choosePlayerBlackHole({ initial = false } = {}) {
-  const match = state.match;
-  const serial = state.serial;
-  return new Promise((resolve) => {
-    if (!match || match !== state.match || !match.selectionRequired(state.myColor)) {
-      resolve(false);
-      return;
-    }
-    const choices = match.eligibleBlackHoles(state.myColor);
-    if (!choices.length) {
-      resolve(false);
-      return;
-    }
-
-    state.screen = 'placing';
-    setThinking(false);
-    clearTaunt();
-    const previousSquare = initial ? null : match.lastTriggeredSquare(state.myColor);
-    setPlayerAction(initial ? 'Choose black hole' : 'Choose new black hole', {
-      phase: 'selecting',
-      title: initial ? 'Choose your black hole' : 'Choose a new black hole',
-      copy: previousSquare
-        ? `Tap any marked empty square. ${previousSquare} is available again.`
-        : 'Tap any marked empty square on the board.',
-    });
-    panelHolePlacement({ initial, previousSquare });
-    board.setBlackHoleState({ own: null, spent: previousSquare });
-    const handleSelection = async (square) => {
-      if (state.serial !== serial || state.match !== match || state.over) return;
-      try {
-        match.selectBlackHole(state.myColor, square);
-      } catch {
-        sound.illegal();
-        board.setHoleSelection(match.eligibleBlackHoles(state.myColor), handleSelection, { previousSquare });
-        return;
-      }
-      if (state.serial !== serial || state.match !== match || state.over) return;
-      state.screen = 'playing';
-      syncBoard();
-      panelPlaying();
-      showArmedHoleStatus();
-      persistGame();
-      announce(`Your secret black hole is armed on ${square}. MottyBot cannot see it.`);
-      resolve(true);
-    };
-    board.setHoleSelection(choices, handleSelection, { previousSquare });
-    setHoleStatus({
-      phase: 'selecting',
-      title: initial ? 'Choose your secret black hole' : 'Replace your black hole',
-      copy: previousSquare
-        ? `${previousSquare} is available again, or select any other highlighted empty square.`
-        : 'Select any highlighted empty square. Only you will see the marker.',
-    });
-    announce(initial
-      ? 'Choose an empty square for your secret black hole.'
-      : `Your black hole was used. ${previousSquare} is open again and may be selected again.`);
-    focusBoard({ keepActionVisible: true });
-  });
-}
-
-async function startBotGame(level, myColor, { seed = randomSeed() } = {}) {
+function startBotGame(level, myColor, { seed = randomSeed() } = {}) {
   const serial = ++state.serial;
-  state.match = new BlackHoleMatch(seed);
-  const match = state.match;
+  state.match = new ExchangeMatch(seed);
   state.myColor = myColor;
   state.bot = BOTS[level] || BOTS.medium;
   state.over = false;
   state.animating = false;
-  state.screen = 'placing';
+  state.screen = 'playing';
   state.resultRecorded = false;
   state.result = null;
   state.replay = null;
-  state.plannedBotMove = null;
   configureBoardForMatch();
   sound.unlock();
   sound.start();
   resetTaunts();
   clearTaunt();
-  await choosePlayerBlackHole({ initial: true });
-  if (state.serial !== serial || state.match !== match || state.over) return;
-  const botColor = opposingColor(state.myColor);
-  if (state.match.selectionRequired(botColor)) await chooseBotBlackHole();
-  if (state.serial !== serial || state.match !== match || state.over) return;
-  state.screen = 'playing';
-  syncBoard();
   panelPlaying();
-  showArmedHoleStatus();
+  showTradeStatus();
   persistGame();
   showTaunt(pickTaunt('greeting', { always: true }));
   botLoop(serial);
 }
 
-async function resumeGame(data) {
+function resumeGame(data) {
   try {
     const serial = ++state.serial;
     state.match = replayMatch(data.seed, data.actions);
-    const match = state.match;
     state.match.startedAt = data.startedAt || Date.now();
     state.myColor = data.myColor;
     state.bot = BOTS[data.level] || BOTS.medium;
     state.over = false;
     state.animating = false;
-    state.screen = 'placing';
+    state.screen = 'playing';
     state.resultRecorded = false;
     state.result = null;
-    state.plannedBotMove = null;
+    state.replay = null;
     configureBoardForMatch();
     resetTaunts();
     clearTaunt();
-    if (state.match.selectionRequired(state.myColor)) {
-      await choosePlayerBlackHole({ initial: state.match.ply === 0 });
-    }
-    if (state.serial !== serial || state.match !== match || state.over) return;
-    const botColor = opposingColor(state.myColor);
-    if (state.match.selectionRequired(botColor)) await chooseBotBlackHole();
-    if (state.serial !== serial || state.match !== match || state.over) return;
-    state.screen = 'playing';
-    syncBoard();
     panelPlaying();
-    showArmedHoleStatus();
+    showTradeStatus();
     persistGame();
     showTaunt(pickTaunt('greeting', { always: true }));
     botLoop(serial);
@@ -888,80 +622,71 @@ async function playMoveAnimation(move, { instant = false } = {}) {
   syncBoard();
   renderCaptured();
   renderMoveList();
+  renderGraveyards();
+  showTradeStatus();
+  updateCheckMark();
   return true;
 }
 
-// events normally holds one trigger. It holds two only when both players
-// secretly chose the same square and something lands there, spending both
-// traps at once; each still gets its own animation and its own re-arm turn,
-// in sequence.
-async function playBlackHole(events) {
+// The homecoming: the declined capture flashes, the dead piece pops back in
+// on its starting square, and the turn passes.
+async function playResurrection(event, byBot) {
   const match = state.match;
   const serial = state.serial;
-  board.setInteractive(null);
-  if (!events?.length) {
-    updateCheckMark();
-    persistGame();
-    return;
-  }
+  state.animating = true;
+  const pieceName = PIECE_NAMES[event.piece];
+  const victimName = PIECE_NAMES[event.declined.victimType];
+  sound.homecoming();
+  setTradeStatus({
+    phase: 'triggered',
+    title: byBot
+      ? `MottyBot's ${pieceName} came home to ${event.home}`
+      : `Your ${pieceName} came home to ${event.home}`,
+    copy: byBot
+      ? `It spared your ${victimName} on ${event.declined.victimSquare} to do it.`
+      : `You spared MottyBot's ${victimName} on ${event.declined.victimSquare} to do it.`,
+    route: event.home,
+  });
+  announce(byBot
+    ? `MottyBot declined the capture on ${event.declined.victimSquare}. Its ${pieceName} returned to ${event.home}.`
+    : `You declined the capture. Your ${pieceName} returned to ${event.home}.`);
+  await board.animateResurrection({ square: event.home, color: event.color, type: event.piece });
+  if (state.match !== match || state.serial !== serial) return false;
+  state.animating = false;
+  if (state.over) return false;
+  board.setLastMove(event.declined.victimSquare, event.home);
+  syncBoard();
+  renderCaptured();
+  renderMoveList();
+  renderGraveyards();
+  updateCheckMark();
+  showTaunt(pickTaunt(byBot ? 'botReturn' : 'playerReturn', { always: true }));
+  return true;
+}
 
-  for (const event of events) {
-    const owner = event.owner === state.myColor ? 'Your' : "MottyBot's";
-    const victim = event.victimColor === state.myColor ? 'your' : "MottyBot's";
-    state.animating = true;
-    setHoleStatus({
-      phase: 'triggered',
-      title: `${owner} black hole opened on ${event.square}`,
-      copy: `${capitalize(victim)} ${PIECE_NAMES[event.piece.type]} fell in. ${event.square} is open again.`,
-      route: event.square,
-    });
-    announce(`${owner} black hole opened on ${event.square}. ${capitalize(victim)} ${PIECE_NAMES[event.piece.type]} was removed. The square is open again.`);
-    sound.blackHole();
-    await board.animateBlackHole({
-      ...event,
-      consumeOwnHole: event.owner === state.myColor,
-    });
-    if (state.match !== match || state.serial !== serial) return;
-    state.animating = false;
-    if (state.over) return;
-    syncBoard();
-    renderMoveList();
-    renderCaptured();
-    updateCheckMark();
-    reactToBlackHole(event);
-
-    if (match.status().over) {
-      persistGame();
-      return;
+// Every way MottyBot could bring a piece home this turn. Two different
+// captures with the same home square produce the same board, so options are
+// deduplicated by home.
+function collectBotAlternatives(match) {
+  const color = match.turn();
+  const alternatives = [];
+  const seen = new Set();
+  for (const move of match.legalMoves()) {
+    const options = match.resurrectionOptions(move);
+    if (!options) continue;
+    for (const home of options.homes) {
+      if (seen.has(home)) continue;
+      seen.add(home);
+      const fen = resurrectionFen(match.fen(), options.victimType, color, home);
+      if (fen) alternatives.push({ capture: { from: move.from, to: move.to, promotion: move.promotion }, home, fen });
     }
-
-    if (event.owner === state.myColor) {
-      await choosePlayerBlackHole();
-    } else {
-      const replacement = await chooseBotBlackHole();
-      if (state.match !== match || state.serial !== serial || state.over) return;
-      syncBoard();
-      setHoleStatus({
-        phase: 'armed',
-        title: replacement ? 'MottyBot hid a new black hole' : 'MottyBot has no empty square left',
-        copy: replacement
-          ? `Its new trap is secret. Your black hole remains armed on ${match.activeBlackHole(state.myColor)}.`
-          : `Your black hole remains armed on ${match.activeBlackHole(state.myColor)}.`,
-        route: `${match.blackHolesTriggered()} triggered`,
-      });
-    }
-    if (state.match !== match || state.serial !== serial || state.over) return;
   }
-  persistGame();
+  return alternatives;
 }
 
 async function botLoop(serial) {
   const match = state.match;
   while (!state.over && state.screen === 'playing' && state.match === match && state.serial === serial) {
-    const resolvedHole = match.resolveBlackHoleIfDue();
-    if (resolvedHole !== null) await playBlackHole(resolvedHole);
-    if (state.over || state.screen !== 'playing' || state.match !== match || state.serial !== serial) return;
-
     const status = match.status();
     if (status.over) {
       endGame();
@@ -973,34 +698,60 @@ async function botLoop(serial) {
       setThinking(false);
       setYourTurn(true);
       board.setInteractive(state.myColor, (square) => match.legalMoves(square));
-      showArmedHoleStatus();
-      updateRelocateControl();
+      showTradeStatus();
       announce(status.check ? 'Your king is in check. Your move.' : 'Your move.');
       return;
     }
 
     setYourTurn(false);
-    updateRelocateControl();
     board.setInteractive(null);
     setThinking(true);
     const started = performance.now();
-    let candidate;
-    const planned = state.plannedBotMove?.fen === match.fen() ? state.plannedBotMove.move : null;
-    state.plannedBotMove = null;
-    // MottyBot's own trap is not hidden information to MottyBot; keep the
-    // search from walking a piece onto ground it already knows is mined.
-    const ownHole = match.activeBlackHole(match.turn());
+    let action = null;
     try {
-      candidate = planned || await requestBotMove(match.fen(), state.bot.level, ownHole ? [ownHole] : undefined);
+      const candidate = await requestBotMove(match.fen(), state.bot.level);
+      if (state.over || state.match !== match || state.serial !== serial) return;
+      action = candidate ? { kind: 'move', move: candidate } : null;
+      // MottyBot weighs every homecoming against its best chess move, not
+      // just the captures it happened to like: bringing a piece home by
+      // capturing a DEFENDED piece is often the whole point.
+      const alternatives = collectBotAlternatives(match);
+      if (action && alternatives.length) {
+        const preview = new Chess(match.fen());
+        preview.move({ from: candidate.from, to: candidate.to, promotion: candidate.promotion || undefined });
+        const fens = [preview.fen(), ...alternatives.map((alt) => alt.fen)];
+        const choice = await requestBotChoice(fens);
+        if (state.over || state.match !== match || state.serial !== serial) return;
+        if (choice.index > 0) {
+          const alt = alternatives[choice.index - 1];
+          action = { kind: 'resurrect', capture: alt.capture, home: alt.home };
+        }
+      }
     } catch {
       const legal = match.legalMoves();
-      candidate = legal.length ? { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } : null;
+      action = legal.length ? { kind: 'move', move: { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } } : null;
     }
-    const remaining = planned ? 0 : state.bot.minThink - (performance.now() - started);
+    const remaining = state.bot.minThink - (performance.now() - started);
     if (remaining > 0) await wait(remaining);
     setThinking(false);
-    if (!candidate || state.over || state.screen !== 'playing' || state.match !== match || state.serial !== serial) return;
-    const move = match.applyMove(candidate);
+    if (!action || state.over || state.screen !== 'playing' || state.match !== match || state.serial !== serial) return;
+
+    if (action.kind === 'resurrect') {
+      let event = null;
+      try {
+        event = match.resurrect({ ...action.capture, home: action.home });
+      } catch {
+        const legal = match.legalMoves();
+        if (!legal.length) return;
+        action = { kind: 'move', move: { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } };
+      }
+      if (event) {
+        persistGame();
+        if (!await playResurrection(event, true)) return;
+        continue;
+      }
+    }
+    const move = match.applyMove(action.move);
     persistGame();
     announce(`MottyBot moved from ${move.from} to ${move.to}.`);
     if (!await playMoveAnimation(move)) return;
@@ -1008,10 +759,8 @@ async function botLoop(serial) {
   }
 }
 
-async function handleUserMove({ from, to, promotion, instant }) {
+async function performUserMove({ from, to, promotion, instant }) {
   const match = state.match;
-  if (!match || state.over || state.animating || state.screen !== 'playing') return;
-  if (match.turn() !== state.myColor) return;
   let move;
   try {
     move = match.applyMove({ from, to, promotion });
@@ -1021,12 +770,124 @@ async function handleUserMove({ from, to, promotion, instant }) {
     return;
   }
   setYourTurn(false);
-  updateRelocateControl();
   board.setInteractive(null);
   persistGame();
   if (!await playMoveAnimation(move, { instant })) return;
   reactToMove(move, false);
   botLoop(state.serial);
+}
+
+function handleUserMove({ from, to, promotion, instant }) {
+  const match = state.match;
+  if (!match || state.over || state.animating || state.screen !== 'playing') return;
+  if (match.turn() !== state.myColor) return;
+  let options = null;
+  try {
+    options = match.resurrectionOptions({ from, to, promotion });
+  } catch {
+    options = null;
+  }
+  if (options) {
+    beginExchangeChoice({ from, to, promotion, instant }, options);
+    return;
+  }
+  performUserMove({ from, to, promotion, instant });
+}
+
+// The player just gestured a capture that could instead bring a piece home.
+// Freeze the board and put the choice on the action bar.
+function beginExchangeChoice(pending, options) {
+  const match = state.match;
+  const serial = state.serial;
+  state.screen = 'exchange';
+  board.setInteractive(null);
+  // A drag gesture already snapped the piece's sprite onto the target square,
+  // but the capture has NOT been played. verify() cannot catch that (the
+  // piece map is still correct, only the sprite drifted), so rebuild
+  // unconditionally: the capturer visibly returns to its square while the
+  // choice is open.
+  board.setPosition(positionMap());
+  clearTaunt();
+  const victimName = PIECE_NAMES[options.victimType];
+  const homes = options.homes;
+
+  const backToPlay = () => {
+    if (state.serial !== serial || state.match !== match || state.over) return;
+    state.screen = 'playing';
+    syncBoard();
+    setYourTurn(true);
+    board.setInteractive(state.myColor, (square) => match.legalMoves(square));
+    showTradeStatus();
+    announce('Choice canceled. Your move.');
+    focusBoard();
+  };
+
+  const takeIt = () => {
+    if (state.serial !== serial || state.match !== match || state.over || state.screen !== 'exchange') return;
+    state.screen = 'playing';
+    setPlayerAction(null);
+    performUserMove(pending);
+  };
+
+  const doResurrect = async (home) => {
+    if (state.serial !== serial || state.match !== match || state.over) return;
+    let event;
+    try {
+      event = match.resurrect({ from: pending.from, to: pending.to, promotion: pending.promotion, home });
+    } catch {
+      sound.illegal();
+      backToPlay();
+      return;
+    }
+    state.screen = 'playing';
+    setPlayerAction(null);
+    board.setInteractive(null);
+    persistGame();
+    if (!await playResurrection(event, false)) return;
+    botLoop(serial);
+  };
+
+  const bringHome = () => {
+    if (state.serial !== serial || state.match !== match || state.over || state.screen !== 'exchange') return;
+    if (homes.length === 1) {
+      void doResurrect(homes[0]);
+      return;
+    }
+    setPlayerAction('Choose the square', {
+      phase: 'selecting',
+      title: `Where should your ${victimName} return?`,
+      copy: 'Tap one of the highlighted starting squares.',
+      onCancel: backToPlay,
+    });
+    board.setSquareSelection(homes, (square) => { void doResurrect(square); }, {
+      instruction: `Choose which starting square your ${victimName} returns to. Press Escape to cancel.`,
+      choiceLabel: `open starting square for your ${victimName}`,
+      onCancel: backToPlay,
+    });
+    announce(`Choose which starting square your ${victimName} returns to: ${homes.join(' or ')}.`);
+    focusBoard({ keepActionVisible: true });
+  };
+
+  setPlayerAction('Your choice', {
+    phase: 'selecting',
+    title: `Take the ${victimName}, or bring yours home?`,
+    copy: homes.length === 1
+      ? `Take MottyBot's ${victimName} on ${options.victimSquare}, or spare it and your ${victimName} returns to ${homes[0]}.`
+      : `Take MottyBot's ${victimName} on ${options.victimSquare}, or spare it and yours returns to ${homes.join(' or ')}.`,
+    onCancel: backToPlay,
+    buttons: [
+      { label: 'Take it', kind: 'btn--primary', onClick: takeIt },
+      { label: 'Bring mine home', kind: 'btn--magic', onClick: bringHome },
+    ],
+  });
+  setTradeStatus({
+    phase: 'selecting',
+    title: 'A homecoming is on the table',
+    copy: `Spare their ${victimName} and your dead ${victimName} returns to ${homes.join(' or ')}.`,
+    route: homes.join(' '),
+  });
+  announce(`You may take the ${victimName} on ${options.victimSquare}, or bring your own ${victimName} home to ${homes.join(' or ')}. Choose on the action bar.`);
+  focusBoard({ keepActionVisible: true });
 }
 
 /* Results and replay */
@@ -1037,11 +898,9 @@ function outcomeFor(status) {
 
 function reasonText(status, outcome) {
   if (status.reason === 'checkmate') return 'by checkmate';
-  if (status.reason === 'black hole') {
-    return outcome === 'win' ? "MottyBot's king fell into your black hole" : 'your king fell into a black hole';
-  }
   if (status.reason === 'stalemate') return 'by stalemate';
-  if (status.reason === 'insufficient material') return 'by insufficient material';
+  if (status.reason === 'bare kings') return 'only the kings remained';
+  if (status.reason === 'threefold repetition') return 'by threefold repetition';
   if (status.reason === 'fifty-move rule') return 'by the fifty-move rule';
   if (status.reason === 'resignation') return outcome === 'win' ? 'MottyBot resigned' : 'you resigned';
   return status.reason || 'game over';
@@ -1059,22 +918,22 @@ function endGame() {
   setYourTurn(false);
   clearActive();
 
+  setTradeStatus({ phase: 'idle', title: 'Game over', copy: 'Review the game or start a new one.' });
   const outcome = outcomeFor(status);
   if (!state.resultRecorded) {
     recordResult(outcome);
     state.resultRecorded = true;
   }
   const moves = state.match.log.filter((entry) => entry.kind === 'move').length;
-  const triggers = state.match.log.filter((entry) => entry.kind === 'black-hole').length;
+  const returns = state.match.log.filter((entry) => entry.kind === 'resurrect').length;
   const captures = state.match.log.filter((entry) => entry.kind === 'move' && entry.captured).length;
   const signOff = pickTaunt(
     outcome === 'draw' ? 'draw'
-      : outcome === 'win' ? (status.reason === 'black hole' ? 'botHoleLose' : 'botLose')
-        : status.reason === 'black hole' ? 'botHoleWin'
+      : outcome === 'win' ? 'botLose'
         : status.reason === 'resignation' ? 'playerResign' : 'botWin',
     { always: true },
   );
-  state.result = { status, outcome, moves, triggers, captures, signOff };
+  state.result = { status, outcome, moves, returns, captures, signOff };
   sound.end(outcome === 'win');
   clearTaunt();
   panelPostGame();
@@ -1082,14 +941,14 @@ function endGame() {
 }
 
 function showResultModal() {
-  const { status, outcome, moves, triggers, captures, signOff } = state.result;
+  const { status, outcome, moves, returns, captures, signOff } = state.result;
   // Speak to the player. "MottyBot won" makes you work out what happened to
   // you; "You lost" does not.
   const headline = outcome === 'win' ? 'You won' : outcome === 'loss' ? 'You lost' : 'Draw';
   const note = outcome === 'win'
-    ? 'You guarded your secret and found MottyBot before it found you.'
+    ? 'You traded sharper than the machine. Well done.'
     : outcome === 'loss'
-      ? 'One hidden square was enough. Choose a new board and try to return the favor.'
+      ? 'MottyBot out-traded you this time. Take the board back.'
       : 'The board ran out of ways to settle it.';
   showModal(`
     <div class="result-banner result-banner--${outcome}">
@@ -1102,7 +961,7 @@ function showResultModal() {
       ${signOff ? `<p class="bot-quote">${escapeHTML(signOff)}<span>MottyBot</span></p>` : ''}
       <div class="result-stats">
         <div><strong>${moves}</strong><span>Moves</span></div>
-        <div><strong>${triggers}</strong><span>Triggered</span></div>
+        <div><strong>${returns}</strong><span>Homecomings</span></div>
         <div><strong>${captures}</strong><span>Captures</span></div>
       </div>
       <div class="button-stack">
@@ -1111,24 +970,24 @@ function showResultModal() {
           Share result
         </button>
         <button class="btn btn--secondary" id="result-new">Play again</button>
-        <button class="btn btn--secondary" id="result-same" title="A new game in which MottyBot hides its black hole on the same square it used here">Rematch, same traps</button>
         <button class="btn btn--quiet" id="result-review">Review the game</button>
       </div>
       <div class="copy-confirm" id="copy-confirm" aria-live="polite"></div>
     </div>`);
   $('result-new').onclick = () => { hideModal(); startBotGame(state.bot.level, state.myColor); };
-  $('result-same').onclick = () => { const seed = state.match.seed; hideModal(); startBotGame(state.bot.level, state.myColor, { seed }); };
   $('result-review').onclick = () => { hideModal(); enterReplay(); };
   $('result-share').onclick = shareResult;
 }
 
 function resultSentence() {
-  const { outcome, moves } = state.result;
+  const { outcome, moves, returns } = state.result;
   const who = `${state.bot.label} MottyBot`;
   const verb = outcome === 'win' ? `I beat ${who}`
     : outcome === 'loss' ? `${who} beat me`
       : `I drew with ${who}`;
-  return `${verb} at Chess (Motty's Version) in ${moves} moves. We each hid a one-use black hole, and every spent square opened again.`;
+  const homecomings = returns === 1 ? ' and brought one piece back from the dead'
+    : returns > 1 ? ` and brought ${returns} pieces back from the dead` : '';
+  return `${verb} at Chess (Motty's Version) in ${moves} moves${homecomings}. This week's rules: Prisoner Exchange.`;
 }
 
 async function shareResult() {
@@ -1144,66 +1003,32 @@ async function shareResult() {
     if (confirm) confirm.textContent = 'Result and link copied.';
   } catch (error) {
     if (error?.name === 'AbortError') return;
-    if (confirm) confirm.textContent = 'Could not copy. The link is in your address bar.';
+    if (confirm) confirm.textContent = 'Could not copy the link.';
   }
 }
 
 function buildReplayFrames() {
-  const frames = [{ fen: START_FEN, kind: 'start', label: 'Starting position', detail: 'Before the secret squares were chosen', ownHole: null, spent: null }];
-  const active = { w: null, b: null };
+  const frames = [{ fen: START_FEN, kind: 'start', label: 'Starting position', detail: 'Every piece on the square it will remember' }];
   for (const entry of state.match.log) {
-    if (entry.kind === 'placement') {
-      active[entry.color] = entry.square;
-      if (entry.color === state.myColor) {
-        frames.push({
-          fen: entry.fenAfter,
-          kind: 'placement',
-          label: `Your black hole: ${entry.square}`,
-          detail: entry.sequence === 1
-            ? 'Your opening secret'
-            : entry.square === entry.previousSquare ? 'You armed the same square again' : 'Your replacement secret',
-          ownHole: entry.square,
-          spent: null,
-          square: entry.square,
-        });
-      }
-    } else if (entry.kind === 'move') {
-      const number = Math.floor(entry.ply / 2) + 1;
+    const number = Math.floor(entry.ply / 2) + 1;
+    const marker = `${number}${entry.color === 'w' ? '.' : '…'}`;
+    if (entry.kind === 'move') {
       frames.push({
         fen: entry.fenAfter,
         kind: 'move',
-        label: `${number}${entry.color === 'w' ? '.' : '…'} ${entry.san}`,
+        label: `${marker} ${entry.san}`,
         detail: entry.color === state.myColor ? 'Your move' : "MottyBot's move",
         from: entry.from,
         to: entry.to,
-        ownHole: active[state.myColor],
-        spent: null,
       });
-    } else if (entry.kind === 'relocation') {
-      active[entry.color] = entry.to;
-      if (entry.color === state.myColor) {
-        frames.push({
-          fen: entry.fenAfter,
-          kind: 'relocation',
-          label: `Your black hole: ${entry.from} to ${entry.to}`,
-          detail: `You used your turn and have ${entry.remaining} ${entry.remaining === 1 ? 'change' : 'changes'} left`,
-          ownHole: entry.to,
-          spent: null,
-          square: entry.to,
-        });
-      }
-    } else if (entry.kind === 'black-hole') {
-      active[entry.owner] = null;
+    } else if (entry.kind === 'resurrect') {
       frames.push({
         fen: entry.fenAfter,
-        kind: 'black-hole',
-        label: `${capitalize(PIECE_NAMES[entry.piece.type])} lost on ${entry.square}`,
-        detail: `${entry.square} opened again immediately`,
-        square: entry.square,
-        piece: entry.piece,
-        victimColor: entry.victimColor,
-        ownHole: active[state.myColor],
-        spent: entry.square,
+        kind: 'resurrect',
+        label: `${marker} ${capitalize(PIECE_NAMES[entry.piece])} home to ${entry.home}`,
+        detail: `${entry.color === state.myColor ? 'You' : 'MottyBot'} spared the ${PIECE_NAMES[entry.declined.victimType]} on ${entry.declined.victimSquare}`,
+        from: entry.declined.victimSquare,
+        to: entry.home,
       });
     }
   }
@@ -1219,7 +1044,7 @@ function enterReplay() {
   state.replay = { frames: buildReplayFrames(), index: 0 };
   board.setInteractive(null);
   panel.innerHTML = `
-    <div class="desk-head"><h2>Review the game.</h2><p>Step through every move, relocation, secret-square choice and triggered trap.</p></div>
+    <div class="desk-head"><h2>Review the game.</h2><p>Step through every move and every homecoming.</p></div>
     <div class="replay-readout"><strong id="replay-label"></strong><span id="replay-detail"></span></div>
     <div class="replay-controls" role="group" aria-label="Replay controls">
       <button id="replay-start" aria-label="First position">|‹</button>
@@ -1227,7 +1052,6 @@ function enterReplay() {
       <button id="replay-next" aria-label="Next position">›</button>
       <button id="replay-end" aria-label="Final position">›|</button>
     </div>
-    <div class="desk-body"><p style="color:var(--muted);line-height:1.5;margin:0">MottyBot's active black hole stays secret in review. Your own choices and every triggered square remain visible.</p></div>
     <div class="desk-footer"><button class="btn btn--primary" id="replay-exit">Exit review</button></div>`;
   $('replay-start').onclick = () => setReplayFrame(0);
   $('replay-prev').onclick = () => setReplayFrame(state.replay.index - 1);
@@ -1243,8 +1067,7 @@ function setReplayFrame(index) {
   state.replay.index = Math.max(0, Math.min(max, index));
   const frame = state.replay.frames[state.replay.index];
   board.setPosition(positionMap(frame.fen));
-  board.setLastMove(frame.kind === 'move' ? frame.from : null, frame.kind === 'move' ? frame.to : null);
-  board.setBlackHoleState({ own: frame.ownHole, spent: frame.spent || null });
+  board.setLastMove(frame.from || null, frame.to || null);
   updateCheckMark(frame.fen);
   $('replay-label').textContent = frame.label;
   $('replay-detail').textContent = `${frame.detail}. Frame ${state.replay.index + 1} of ${state.replay.frames.length}.`;
@@ -1252,15 +1075,10 @@ function setReplayFrame(index) {
   $('replay-prev').disabled = state.replay.index === 0;
   $('replay-next').disabled = state.replay.index === max;
   $('replay-end').disabled = state.replay.index === max;
-  if (frame.kind === 'black-hole') {
-    const victim = frame.victimColor === state.myColor ? 'your' : "MottyBot's";
-    setHoleStatus({ phase: 'triggered', title: `Black hole opened on ${frame.square}`, copy: `${capitalize(victim)} ${PIECE_NAMES[frame.piece.type]} disappeared. The square reopened.`, route: frame.square });
-  } else if (frame.kind === 'placement') {
-    setHoleStatus({ phase: 'armed', title: 'Your black hole is armed', copy: frame.detail, route: frame.square });
-  } else if (frame.kind === 'relocation') {
-    setHoleStatus({ phase: 'armed', title: `Your black hole moved to ${frame.square}`, copy: frame.detail, route: frame.square });
+  if (frame.kind === 'resurrect') {
+    setTradeStatus({ phase: 'triggered', title: frame.label.replace(/^\S+ /, ''), copy: frame.detail, route: frame.to });
   } else {
-    setHoleStatus({ title: frame.label, copy: frame.detail });
+    setTradeStatus({ title: frame.label, copy: frame.detail });
   }
 }
 
@@ -1269,9 +1087,8 @@ function exitReplay() {
   state.replay = null;
   board.setPosition(positionMap());
   board.setLastMove(null);
-  board.setBlackHoleState({ own: state.match.activeBlackHole(state.myColor), spent: null });
   updateCheckMark();
-  showArmedHoleStatus();
+  showTradeStatus();
   panelPostGame();
 }
 
@@ -1320,17 +1137,15 @@ document.addEventListener('keydown', (event) => {
 function showRules() {
   markRulesSeen();
   showModal(`
-    <div class="modal__head"><h2 id="modal-title">Black Hole Chess.</h2><p>Ordinary chess, plus one hidden trap each.</p></div>
+    <div class="modal__head"><h2 id="modal-title">Prisoner Exchange.</h2><p>Ordinary chess. Your dead can come back.</p></div>
     <div class="modal__body">
       <ol class="rule-list">
-        <li><span class="rule-mark">1</span><span><b>You each hide one black hole.</b> Any empty square. You see yours, MottyBot never sees it, and you may both pick the same square without knowing.</span></li>
-        <li><span class="rule-mark">2</span><span><b>It swallows anyone who lands on it, you included.</b> A piece has to land there; passing over it does nothing. Your own trap is no safer for you than it is for MottyBot.</span></li>
-        <li><span class="rule-mark">3</span><span><b>Whatever lands there is gone.</b> If the move was a capture, both pieces leave the board: the one that was taken, and the one that took it.</span></li>
-        <li><span class="rule-mark">4</span><span><b>One trap, one victim.</b> The square turns ordinary the instant it fires, and anything may use it later. Only the player whose trap fired picks a new square; your opponent keeps theirs.</span></li>
-        <li><span class="rule-mark">5</span><span><b>You can move your trap three times a game.</b> It costs your whole turn instead of a chess move, and you cannot do it while your king is in check.</span></li>
-        <li><span class="rule-mark">6</span><span><b>Your king is not safe either.</b> If your king lands on any trap, yours or theirs, you lose on the spot. Checkmate, stalemate, resignation and the fifty-move rule all still work, and two bare kings keep playing, because a trap can still end it.</span></li>
-        <li><span class="rule-mark">7</span><span><b>A black hole can never touch a king.</b> Not yours, not MottyBot's. This holds every time you place one, all game: your first pick, a re-arm, or a relocation.</span></li>
-        <li><span class="rule-mark">8</span><span><b>Your very first black hole can't sit in front of MottyBot's pawns.</b> No camping on the row its pieces are about to walk into. Once it fires and you pick again, that row opens up too.</span></li>
+        <li><span class="rule-mark">1</span><span><b>Every piece remembers home.</b> The square it stood on at move one.</span></li>
+        <li><span class="rule-mark">2</span><span><b>Your dead wait in a graveyard.</b> Knights, bishops, rooks and queens. Pawns are ordinary chess pawns: once captured, they are gone.</span></li>
+        <li><span class="rule-mark">3</span><span><b>Capture a matching piece and choose.</b> Take it off the board like normal chess, or spare it: their piece stays where it stood, your dead piece of the same kind returns to its starting square, and your turn ends.</span></li>
+        <li><span class="rule-mark">4</span><span><b>Home must be empty.</b> If the starting square is occupied, that piece cannot come back yet. A promoted piece that dies waits like any other and returns to the standard square of its kind.</span></li>
+        <li><span class="rule-mark">5</span><span><b>No limits.</b> Every fresh matching capture is another chance, and each return uses up one dead piece.</span></li>
+        <li><span class="rule-mark">6</span><span><b>Everything else is chess.</b> Check, checkmate, castling, promotion. Draws: stalemate, threefold repetition, the fifty-move rule, or nothing left but the two kings. A returned rook cannot castle, and in check a return must block the check.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);
@@ -1365,6 +1180,8 @@ function requestNewGame() {
     state.over = true;
     state.animating = false;
     state.match = null;
+    // Abandoning mid-choice must not leave a dead exchange dialog behind.
+    setPlayerAction(null);
     panelSetup();
   };
 }
@@ -1394,11 +1211,14 @@ function boot() {
   $('nav-sound').setAttribute('aria-pressed', String(!sound.muted));
   $('nav-sound').setAttribute('aria-label', sound.muted ? 'Sound off' : 'Sound on');
   $('nav-sound-label').textContent = sound.muted ? 'Sound off' : 'Sound on';
-  const lobby = new BlackHoleMatch('lobby-board');
-  board.setPosition(parseFen(lobby.fen()).board);
-  board.setBlackHoleState({ own: null, spent: null });
+  board.setPosition(parseFen(START_FEN).board);
   board.setInteractive(null);
   panelHome();
+  // Read-only introspection for the local test harness. Never on the
+  // deployed site.
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    window.__mv = { state, board };
+  }
 }
 
 boot();

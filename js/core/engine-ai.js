@@ -2,19 +2,15 @@
 // quiescence, killer/history move ordering and check extensions, running on the
 // 0x88 board in fastboard.js.
 //
-// Active black holes do not alter legal chess moves. The search is never
-// told the player's secret square, so it can genuinely blunder into that one
-// the way a person could. Its own trap is a different case: that square was
-// never hidden from MottyBot, it placed it, so opts.avoidSquares lets a
-// caller keep the search from walking a piece onto ground it already knows
-// is mined. Deliberately stepping on your own trap is not a fair risk you
-// share with your opponent, it is just not noticing your own board.
+// The search plays pure chess. Weekly house rules (this week: Prisoner
+// Exchange) are judged outside the search, by comparing the positions each
+// choice produces.
 
 import { Chess } from '../vendor/chess.js';
 import {
   FastBoard, moveFrom, moveTo, movePromo, moveKind, moveToUci,
-  KIND_EP, KIND_CASTLE, EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
-  WHITE, colorOf, typeOf, fileOf, rankOf, sq0x88, squareName,
+  KIND_EP, EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
+  WHITE, colorOf, typeOf, fileOf, rankOf,
 } from './fastboard.js';
 import { makeRng, seedFromString } from './rng.js';
 
@@ -310,32 +306,12 @@ function endgameDepthBonus(board) {
   return 0;
 }
 
-// The square(s) a move actually occupies once played: the moved piece's
-// destination, plus the rook's destination for a castle. Mirrors the
-// landings black-hole.js checks a trap against.
-function landingSquares(move) {
-  const to = moveTo(move);
-  if (moveKind(move) !== KIND_CASTLE) return [squareName(to)];
-  const file = fileOf(to);
-  const rookFile = file === 6 ? 5 : 3; // king to g -> rook to f, king to c -> rook to d
-  return [squareName(to), squareName(sq0x88(rookFile, rankOf(to)))];
-}
-
 export function think(fen, level, seed, opts = {}) {
   const cfg = { ...(LEVELS[level] || LEVELS.medium), ...opts };
   const rng = makeRng(seedFromString(String(seed ?? 'mottybot')));
   const board = new FastBoard(fen);
-  let rootMoves = board.legalMoves();
+  const rootMoves = board.legalMoves();
   if (!rootMoves.length) return null;
-
-  if (opts.avoidSquares && opts.avoidSquares.length) {
-    const avoid = new Set(opts.avoidSquares);
-    // Never reduce MottyBot to zero legal moves over this. If every legal
-    // move happens to land on its own trap, it has no choice but to play
-    // one; the search still picks the best chess move among them.
-    const safe = rootMoves.filter((move) => !landingSquares(move).some((sq) => avoid.has(sq)));
-    if (safe.length) rootMoves = safe;
-  }
 
   cfg.maxDepth += Math.min(endgameDepthBonus(board), cfg.endgameBonus ?? 0);
   const deadline = Date.now() + cfg.timeMs;
