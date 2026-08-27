@@ -107,25 +107,42 @@ const PROBE_DEPTH = 4;
 // at every leaf, even a two-ply search never hangs a piece, which is why the
 // old Casual beat a careful beginner in 96 games out of 100.
 //
-//   maxDepth   how far ahead it looks
-//   scoreNoise how clearly it sees what it looked at
-//   flatEval   whether it understands anything beyond material
+//   maxDepth      how far ahead it looks
+//   quietDepth    how far it can follow an exchange on one square
+//   mistakeChance how often it gets one wrong
+//   mistakeSize   how badly, when it does
+//
+// The weaker levels play their best move MOST of the time and go properly
+// wrong every so often, which is what a weak player actually looks like. An
+// earlier version nudged every move a little instead; that made even Casual
+// look aimless rather than weak, because no move it played was ever the one
+// the position asked for.
 //
 // All three understand this week's house rule completely and judge a
 // homecoming at the same depth. A weak level is weak at CHESS; it is never
 // confused about what the rules let it do.
 export const LEVELS = {
+  // Casual looks one move ahead and does not follow the exchange back, so it
+  // sees what it takes and not what comes back. That is what being bad at
+  // chess actually is, and it leaves the move it picks looking deliberate:
+  // measured, it plays its own best move 70% of the time, where the version
+  // that nudged every score managed 3%.
+  //
+  // maxDepth and endgameBonus must both keep the search depth ODD here. With
+  // no quiescence the parity of the depth decides whether the last word
+  // belongs to Casual or its opponent, and on an even depth it stops
+  // recapturing and looks broken rather than weak.
   easy: {
-    label: 'Casual', maxDepth: 1, timeMs: 300,
-    scoreNoise: 300, flatEval: true, endgameBonus: 2, probeDepth: PROBE_DEPTH,
+    label: 'Casual', maxDepth: 1, timeMs: 500, quietDepth: 0,
+    mistakeChance: 0.25, mistakeSize: 300, endgameBonus: 2, probeDepth: PROBE_DEPTH,
   },
   medium: {
-    label: 'Average', maxDepth: 3, timeMs: 1100,
-    scoreNoise: 55, endgameBonus: 4, probeDepth: PROBE_DEPTH,
+    label: 'Average', maxDepth: 3, timeMs: 1400, quietDepth: 4,
+    mistakeChance: 0.22, mistakeSize: 300, endgameBonus: 4, probeDepth: PROBE_DEPTH,
   },
   hard: {
-    label: 'Expert', maxDepth: 24, timeMs: 4500,
-    scoreNoise: 0, endgameBonus: 12, probeDepth: PROBE_DEPTH,
+    label: 'Expert', maxDepth: 24, timeMs: 4500, quietDepth: -1,
+    mistakeChance: 0, mistakeSize: 0, endgameBonus: 12, probeDepth: PROBE_DEPTH,
   },
 };
 
@@ -185,10 +202,6 @@ function claimValue(squares, claims, enemyCounts) {
 /* ---------------- evaluation ---------------- */
 function evaluate(board) {
   const sq = board.squares;
-  // A flat evaluation counts material and nothing else. No development, no
-  // king safety, no pawn structure: the mating drive stays so a won game
-  // still gets finished.
-  const flat = board.flatEval === true;
   let score = 0;                 // white's point of view
   let forceW = 0, forceB = 0;    // non-king, non-pawn+pawn material
   let nonPawn = 0;
@@ -214,22 +227,19 @@ function evaluate(board) {
     if (type === PAWN) {
       if (color === WHITE) pawnFilesW[fileOf(s)]++; else pawnFilesB[fileOf(s)]++;
     }
-    const v = flat ? base : base + PST[type][pstIndex(s, color)];
+    const v = base + PST[type][pstIndex(s, color)];
     score += color === WHITE ? v : -v;
   }
 
   const endgame = nonPawn <= 2200;
-  if (!flat) {
-    const kingTable = endgame ? KING_END : PST[KING];
-    if (kingW >= 0) score += kingTable[pstIndex(kingW, WHITE)];
-    if (kingB >= 0) score -= kingTable[pstIndex(kingB, 1)];
+  const kingTable = endgame ? KING_END : PST[KING];
+  if (kingW >= 0) score += kingTable[pstIndex(kingW, WHITE)];
+  if (kingB >= 0) score -= kingTable[pstIndex(kingB, 1)];
 
-    if (bishopsW >= 2) score += 28;
-    if (bishopsB >= 2) score -= 28;
-  }
+  if (bishopsW >= 2) score += 28;
+  if (bishopsB >= 2) score -= 28;
 
   for (let f = 0; f < 8; f++) {
-    if (flat) break;
     if (pawnFilesW[f] > 1) score -= (pawnFilesW[f] - 1) * 12;
     if (pawnFilesB[f] > 1) score += (pawnFilesB[f] - 1) * 12;
     const isolatedW = pawnFilesW[f] && !(pawnFilesW[f - 1] || 0) && !(pawnFilesW[f + 1] || 0);
@@ -263,10 +273,9 @@ function evaluate(board) {
 }
 
 // A testing seam: the static verdict on one position, with no search at all.
-export function evaluateFen(fen, vouchers, { flatEval = false } = {}) {
+export function evaluateFen(fen, vouchers) {
   const board = new FastBoard(fen);
   board.claims = compileClaims(vouchers);
-  board.flatEval = flatEval;
   return evaluate(board);
 }
 
@@ -278,11 +287,41 @@ function gaussian(rng) {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
+/* ---------------- transposition table ---------------- */
+// Iterative deepening searches the same tree over and over, and a tree
+// transposes into itself constantly. Remembering what a position was worth is
+// the single biggest thing this search was missing.
+//
+// The table is CLEARED at the start of every think(), which is not a
+// performance choice but a correctness one: the evaluation depends on the
+// graveyards (board.claims) and on whether the level counts material only
+// (board.flatEval), and neither of those is part of the position. A table that
+// outlived one search would let Expert read scores that were computed for
+// Casual, or against a graveyard two captures out of date.
+const TT_BITS = 19;                 // 524288 entries, about 6MB, fine on a phone
+const TT_SIZE = 1 << TT_BITS;
+const TT_MASK = TT_SIZE - 1;
+const TT_EXACT = 1, TT_LOWER = 2, TT_UPPER = 3;
+
+const ttKey = new Int32Array(TT_SIZE);   // the other half of the hash, as a check
+const ttScore = new Int32Array(TT_SIZE);
+const ttMoveTable = new Int32Array(TT_SIZE);
+const ttDepth = new Int8Array(TT_SIZE);
+const ttBound = new Int8Array(TT_SIZE);
+const ttStamp = new Int32Array(TT_SIZE); // which search wrote this, so no clearing pass
+let ttGeneration = 0;
+
 /* ---------------- search ---------------- */
 class Search {
-  constructor(board, deadline) {
+  constructor(board, deadline, { quietDepth = -1 } = {}) {
     this.board = board;
     this.deadline = deadline;
+    // How many captures deep the level can follow an exchange on one square.
+    // -1 is no limit, which is what an engine does. A weak player cannot count
+    // a long exchange, and that is a far better model of being bad at chess
+    // than playing random moves: it produces the mistakes people actually
+    // make, and every other move still looks sensible.
+    this.quietDepth = quietDepth;
     this.nodes = 0;
     this.killers = new Int32Array(MAX_PLY * 2);
     this.history = new Int32Array(16 * 128);
@@ -326,13 +365,14 @@ class Search {
     }
   }
 
-  quiesce(alpha, beta, ply) {
+  quiesce(alpha, beta, ply, depth = 0) {
     this.#checkTime();
     const stand = evaluate(this.board);
     if (stand >= beta) return stand;
     let best = stand;
     if (stand > alpha) alpha = stand;
     if (ply >= MAX_PLY - 1) return best;
+    if (this.quietDepth >= 0 && depth >= this.quietDepth) return best;
 
     const moves = this.moveLists[ply];
     this.board.generate(moves, true);
@@ -340,7 +380,7 @@ class Search {
     for (let i = 0; i < moves.length; i++) {
       const move = moves[i];
       if (!this.board.makeIfLegal(move)) continue;
-      const score = -this.quiesce(-beta, -alpha, ply + 1);
+      const score = -this.quiesce(-beta, -alpha, ply + 1, depth + 1);
       this.board.unmake();
       if (score > best) best = score;
       if (score > alpha) alpha = score;
@@ -349,15 +389,48 @@ class Search {
     return best;
   }
 
+  // A mate score counts plies from the ROOT, so it cannot be stored as-is: the
+  // same position reached two plies later is a different number of moves from
+  // mate. Store it relative to the node, put the root back on when reading.
+  #toTT(score, ply) {
+    if (score > MATE_THRESHOLD) return score + ply;
+    if (score < -MATE_THRESHOLD) return score - ply;
+    return score;
+  }
+
+  #fromTT(score, ply) {
+    if (score > MATE_THRESHOLD) return score - ply;
+    if (score < -MATE_THRESHOLD) return score + ply;
+    return score;
+  }
+
   negamax(depth, alpha, beta, ply) {
     this.#checkTime();
     const inCheck = this.board.inCheck();
     if (inCheck) depth++; // never evaluate a position with checks hanging over it
     if (depth <= 0) return this.quiesce(alpha, beta, ply);
 
+    const slot = this.board.keyLo & TT_MASK;
+    const check = this.board.keyHi;
+    let ttMove = 0;
+    if (ttStamp[slot] === ttGeneration && ttKey[slot] === check) {
+      ttMove = ttMoveTable[slot];
+      if (ttDepth[slot] >= depth) {
+        const score = this.#fromTT(ttScore[slot], ply);
+        const bound = ttBound[slot];
+        if (bound === TT_EXACT) return score;
+        if (bound === TT_LOWER && score >= beta) return score;
+        if (bound === TT_UPPER && score <= alpha) return score;
+      }
+    }
+    const alphaAtEntry = alpha;
+
     const moves = this.moveLists[ply];
     this.board.generate(moves);
-    this.#sort(moves, ply, 0);
+    // A stored move can be a stale survivor of a key collision, so it is only
+    // ever used to sort a move list this position actually generated. It can
+    // never smuggle an illegal move into the search.
+    this.#sort(moves, ply, ttMove);
 
     let best = -Infinity;
     let legal = 0;
@@ -389,6 +462,17 @@ class Search {
     }
 
     if (legal === 0) return inCheck ? -MATE + ply : 0; // mate or stalemate
+
+    // Replace on a deeper result or a newer search; a shallower result from
+    // this same search is not worth losing depth over.
+    if (ttStamp[slot] !== ttGeneration || ttDepth[slot] <= depth) {
+      ttKey[slot] = check;
+      ttScore[slot] = this.#toTT(best, ply);
+      ttMoveTable[slot] = bestMove;
+      ttDepth[slot] = depth > 127 ? 127 : depth;
+      ttBound[slot] = best <= alphaAtEntry ? TT_UPPER : (best >= beta ? TT_LOWER : TT_EXACT);
+      ttStamp[slot] = ttGeneration;
+    }
     return best;
   }
 }
@@ -412,16 +496,20 @@ export function think(fen, level, seed, opts = {}) {
   const rng = makeRng(seedFromString(String(seed ?? 'mottybot')));
   const board = new FastBoard(fen);
   board.claims = compileClaims(cfg.vouchers);
-  board.flatEval = cfg.flatEval === true;
   const rootMoves = board.legalMoves();
   if (!rootMoves.length) return null;
 
   cfg.maxDepth += Math.min(endgameDepthBonus(board), cfg.endgameBonus ?? 0);
   const deadline = Date.now() + cfg.timeMs;
-  const search = new Search(board, deadline);
+  // Retire everything the last search stored. See the note on the table: its
+  // scores were computed against a different graveyard, and possibly for a
+  // different level's evaluation.
+  ttGeneration = (ttGeneration + 1) | 0;
+  if (ttGeneration === 0) { ttStamp.fill(0); ttGeneration = 1; }
+  const search = new Search(board, deadline, { quietDepth: cfg.quietDepth ?? -1 });
 
   const scored = rootMoves.map((move) => ({ move, score: -Infinity }));
-  const exactRoot = Boolean(cfg.scoreNoise);
+  const exactRoot = Boolean(cfg.mistakeChance);
   let completedDepth = 0;
 
   for (let depth = 1; depth <= cfg.maxDepth; depth++) {
@@ -473,16 +561,17 @@ export function think(fen, level, seed, opts = {}) {
   scored.sort((a, b) => b.score - a.score);
   let chosen = scored[0];
 
-  // Weaker levels see the position through a haze. Every root move's score is
-  // nudged before the best one is picked, so a weak level overlooks things by
-  // degrees the way a person does: usually the second-best move, sometimes a
-  // real mistake. A forced mate is never traded away and a forced loss is
-  // never walked into, so even Casual finishes what it starts.
-  if (cfg.scoreNoise && scored.length > 1 && Math.abs(chosen.score) < MATE_THRESHOLD) {
+  // Weaker levels play the move they found, and every so often get one wrong.
+  // The mistake is a real one when it comes: the whole root list is judged
+  // through a haze that turn, so the move it settles on can be a piece worse
+  // rather than a shade worse. A forced mate is never traded away and a forced
+  // loss is never walked into, so even Casual finishes what it starts.
+  if (cfg.mistakeChance && scored.length > 1 && Math.abs(chosen.score) < MATE_THRESHOLD
+    && rng.next() < cfg.mistakeChance) {
     let bestHazed = -Infinity;
     for (const entry of scored) {
       if (!Number.isFinite(entry.score) || entry.score <= -MATE_THRESHOLD) continue;
-      const hazed = entry.score + gaussian(rng) * cfg.scoreNoise;
+      const hazed = entry.score + gaussian(rng) * cfg.mistakeSize;
       if (hazed > bestHazed) { bestHazed = hazed; chosen = entry; }
     }
   }

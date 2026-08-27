@@ -17,7 +17,7 @@ import { think } from '../js/core/engine-ai.js';
 const GAMES = Number(process.argv[2] || 12);
 const LEVEL = process.argv[3] || 'medium';
 const MS = Number(process.argv[4] || 140);
-const CFG = { timeMs: MS, scoreNoise: 0, endgameBonus: 0 };
+const CFG = { timeMs: MS, mistakeChance: 0, endgameBonus: 0 };
 
 function vouchersAfter(match, action) {
   try {

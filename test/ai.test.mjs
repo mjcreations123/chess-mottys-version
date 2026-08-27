@@ -114,7 +114,7 @@ for (const level of ['easy', 'medium', 'hard']) {
 {
   const fen = '6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1'; // Ra8#
   for (const level of ['medium', 'hard']) {
-    const mv = think(fen, level, 'mate1', { scoreNoise: 0 });
+    const mv = think(fen, level, 'mate1', { mistakeChance: 0 });
     assert(mv.from === 'a1' && mv.to === 'a8', `${level} missed mate in 1, played ${mv.from}${mv.to}`);
   }
   ok('mate in one found');
@@ -123,7 +123,7 @@ for (const level of ['easy', 'medium', 'hard']) {
 // 4. free queen taken (hard)
 {
   const fen = '7k/8/8/3q4/4P3/8/8/7K w - - 0 1'; // exd5 wins the queen
-  const mv = think(fen, 'hard', 'freeq', { scoreNoise: 0 });
+  const mv = think(fen, 'hard', 'freeq', { mistakeChance: 0 });
   assert(mv.from === 'e4' && mv.to === 'd5', `hard ignored free queen, played ${mv.from}${mv.to}`);
   ok('free queen captured');
 }
@@ -131,7 +131,7 @@ for (const level of ['easy', 'medium', 'hard']) {
 // 5. hanging enemy queen punished
 {
   const fen = 'rnb1kbnr/pppp1ppp/8/4p3/6q1/5N2/PPPPPPPP/RNBQKB1R w KQkq - 0 1';
-  const mv = think(fen, 'hard', 'takeq', { scoreNoise: 0 });
+  const mv = think(fen, 'hard', 'takeq', { mistakeChance: 0 });
   assert(mv.from === 'f3' && (mv.to === 'g4' || mv.to === 'e5'), `expected queen grab, got ${mv.from}${mv.to}`);
   ok('hanging enemy queen punished');
 }
@@ -142,7 +142,7 @@ for (const level of ['easy', 'medium', 'hard']) {
 {
   const fen = '6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1'; // Ra8#
   for (const level of ['medium', 'hard']) {
-    const mv = think(fen, level, 'mate-window', { scoreNoise: 0 });
+    const mv = think(fen, level, 'mate-window', { mistakeChance: 0 });
     assert(mv.from === 'a1' && mv.to === 'a8',
       `${level} played ${mv.from}${mv.to} instead of mate; quiescence may be fail-hard again`);
   }
@@ -153,7 +153,7 @@ for (const level of ['easy', 'medium', 'hard']) {
 // without a mating drive the eval is flat and the search shuffles until the
 // fifty-move rule. It must find a basic mate and herd the lone king outward.
 {
-  const OPTS = { maxDepth: 4, timeMs: 900, scoreNoise: 0 };
+  const OPTS = { maxDepth: 4, timeMs: 900, mistakeChance: 0 };
   const mv = think('7k/8/7K/8/8/8/8/R7 w - - 0 1', 'hard', 'rook-mate', OPTS);
   assert(mv.from === 'a1' && mv.to === 'a8', `missed the rook mate in one, played ${mv.from}${mv.to}`);
 
@@ -183,8 +183,8 @@ for (const level of ['easy', 'medium', 'hard']) {
 // Math.random usage)
 {
   const fen = 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4';
-  const a = think(fen, 'medium', 'same-seed', { scoreNoise: 0 });
-  const b = think(fen, 'medium', 'same-seed', { scoreNoise: 0 });
+  const a = think(fen, 'medium', 'same-seed', { mistakeChance: 0 });
+  const b = think(fen, 'medium', 'same-seed', { mistakeChance: 0 });
   assert(a.from === b.from && a.to === b.to, 'bot not deterministic for same seed');
   ok('bot deterministic per seed');
 }

@@ -17,23 +17,20 @@
 // (LEVELS[x].timeMs), so anything else competing for CPU makes the numbers
 // lie: a loaded machine quietly turns Expert into Average.
 //
-// What this measured, 2026-08-27. Every level used to be the same opponent to
-// anyone below club strength, because captures are resolved at every leaf and
-// so even a two-ply search never hangs a piece. Percentages are how often the
-// OPPONENT wins:
+// What this measured, 2026-08-27. Percentages are how often the OPPONENT wins.
 //
 //                     novice   casual player   good player
-//   Casual  before       4%          2%             -
-//   Average before       0%          0%             -
-//   Expert  before       6%          0%             -
+//   Casual              48%         96%           100%
+//   Average              0%          0%            61%
+//   Expert                -           -             0%
 //
-//   Casual  now         13%         88%           100%
-//   Average now          0%          0%            67%
-//   Expert  now          -           -              0%   (8 games, 8 mates)
-//
-// The knobs that moved Casual were scoreNoise and flatEval, not depth. Turning
-// quiescence off was tried and rejected: it bought less and hung far more, and
-// it makes the search's optimism flip with the parity of the depth.
+// Two things mattered more than the numbers. First, a level that is nudged off
+// its best move on every turn does not look weak, it looks like it is not
+// trying: Casual now plays the move it actually found 70% of the time and is
+// still easier to beat than the version that managed 3%. Weakness belongs in
+// what it can SEE, not in whether it acts on what it sees. Second, the
+// transposition table lifted every level at once, so the whole ladder had to
+// be retuned underneath it.
 
 import { Chess } from '../js/vendor/chess.js';
 import { ExchangeMatch, resurrectionFen, replayMatch } from '../js/core/exchange.js';
@@ -151,8 +148,8 @@ export const REFERENCES = {
     stands_for: 'three plies with the captures resolved, and a positional opinion',
     pick(state, rng, seed) {
       const move = think(state.fen, 'medium', seed, {
-        maxDepth: 3, timeMs: 1500, scoreNoise: 0, endgameBonus: 0,
-        flatEval: false, vouchers: state.vouchers,
+        maxDepth: 3, timeMs: 1500, mistakeChance: 0, endgameBonus: 0,
+        vouchers: state.vouchers,
       });
       if (!move) return state.moves[rng.int(state.moves.length)];
       return state.moves.find((m) => m.from === move.from && m.to === move.to

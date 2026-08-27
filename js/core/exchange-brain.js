@@ -22,7 +22,7 @@ export function scoreForDecider(fen, level, seed, probeMs, vouchers) {
   const config = LEVELS[level] || LEVELS.medium;
   think(fen, level, seed, {
     stats,
-    scoreNoise: 0,
+    mistakeChance: 0,
     endgameBonus: 0,
     timeMs: probeMs,
     ...(config.probeDepth ? { maxDepth: config.probeDepth } : {}),

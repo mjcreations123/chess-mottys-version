@@ -17,7 +17,7 @@ const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const BOTS = {
   easy: {
     name: 'MottyBot', label: 'Casual', level: 'easy', minThink: 600,
-    blurb: 'Counts the pieces and not much else. Anyone can beat it.',
+    blurb: 'Looks one move ahead and forgets you get a move too. Anyone can beat it.',
   },
   medium: {
     name: 'MottyBot', label: 'Average', level: 'medium', minThink: 900,
@@ -354,22 +354,28 @@ function renderRails() {
 // Ring the enemy pieces whose capture would bring one of yours home, and mark
 // the home squares waiting to receive them. Only while it is genuinely your
 // move: at any other moment the rings would be pointing at nothing.
+// Ring the enemy pieces you could take right now to bring one of yours home,
+// and say in words what the ring means. A mark on a board can only ever be as
+// clear as the sentence next to it, and there was no sentence.
 function updateOpportunities() {
-  const live = state.match && !state.over && !reviewing()
-    && (state.screen === 'playing' || state.screen === 'exchange');
-  if (!live) {
+  const myMove = state.match && !state.over && !reviewing()
+    && state.screen === 'playing' && !state.animating
+    && state.match.turn() === state.myColor;
+  if (!myMove) {
     board.setOpportunities({});
     return;
   }
-  // Which of your pieces MottyBot is waiting for stays true on both turns,
-  // and matters most while it is thinking.
-  const risks = state.match.exposedTo(state.myColor);
-  if (state.screen !== 'playing' || state.match.turn() !== state.myColor) {
-    board.setOpportunities({ risks });
-    return;
-  }
-  const { targets, homes } = state.match.offerTargets();
-  board.setOpportunities({ targets: targets.map((item) => item.square), homes, risks });
+  const { targets } = state.match.offerTargets();
+  board.setOpportunities({ targets: targets.map((item) => item.square) });
+  if (!targets.length) return;
+
+  const homes = [...new Set(targets.flatMap((item) => item.homes))];
+  const first = targets[0];
+  const copy = targets.length === 1
+    ? `Take the ${PIECE_NAMES[first.type]} on ${first.square} and your ${PIECE_NAMES[first.type]} comes back to ${first.homes.join(' or ')}.`
+    : `${targets.map((item) => `the ${PIECE_NAMES[item.type]} on ${item.square}`).join(', ')}. Take one and yours comes back to ${homes.join(' or ')}.`;
+  showNote(targets.length === 1 ? 'The ringed piece brings one of yours home'
+    : 'The ringed pieces bring one of yours home', copy, 'offer');
 }
 
 function renderLive() {
@@ -537,9 +543,7 @@ function panelPlaying() {
       <p>Capture a piece that matches one of your dead, and you may undo the capture and bring yours home to its starting square instead.</p>
     </div>
     <div class="desk-legend">
-      <p><span class="legend-key legend-key--offer" aria-hidden="true"></span>A ringed enemy piece can be taken to bring one of yours home.</p>
-      <p><span class="legend-key legend-key--home" aria-hidden="true"></span>A dotted square is a home that could be filled this very turn.</p>
-      <p><span class="legend-key legend-key--risk" aria-hidden="true"></span>A marked piece of yours is the one MottyBot is waiting to take.</p>
+      <p><span class="legend-key legend-key--offer" aria-hidden="true"></span>A ringed enemy piece can be taken to bring one of yours home. The bar above the board says which one.</p>
     </div>
     <div class="review-nav" role="group" aria-label="Step back through the game">
       <button id="review-first" type="button" aria-label="First position">|&lsaquo;</button>

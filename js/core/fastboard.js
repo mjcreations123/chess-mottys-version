@@ -11,6 +11,8 @@
 // every move the search finally returns is re-validated against chess.js
 // before it is played, so a bug here can never produce an illegal move.
 
+import { makeRng, seedFromString } from './rng.js';
+
 export const EMPTY = 0;
 export const PAWN = 1, KNIGHT = 2, BISHOP = 3, ROOK = 4, QUEEN = 5, KING = 6;
 export const WHITE = 0, BLACK = 1;
@@ -46,6 +48,35 @@ const FEN_PIECES = {
   p: PAWN | 8, n: KNIGHT | 8, b: BISHOP | 8, r: ROOK | 8, q: QUEEN | 8, k: KING | 8,
   P: PAWN, N: KNIGHT, B: BISHOP, R: ROOK, Q: QUEEN, K: KING,
 };
+
+/* ---------- Zobrist hashing ---------- */
+// A 64-bit key carried as two 32-bit halves, because that is what JavaScript's
+// bitwise operators actually work on. The numbers are drawn from a fixed seed,
+// so the same position always hashes the same way in every process: the engine
+// has to stay reproducible for a given (fen, seed).
+//
+// What is hashed: the pieces, the side to move, the castling mask, and the FILE
+// of the en passant square. What is NOT hashed: the halfmove clock and the ply,
+// which the search never reads, and which would make every node unique.
+const ZOBRIST = (() => {
+  const rng = makeRng(seedFromString('mottybot-zobrist-v1'));
+  const word = () => (Math.floor(rng.next() * 4294967296) | 0);
+  const pair = (n) => {
+    const lo = new Int32Array(n);
+    const hi = new Int32Array(n);
+    for (let i = 0; i < n; i++) { lo[i] = word(); hi[i] = word(); }
+    return { lo, hi };
+  };
+  return {
+    piece: pair(16 * 128),   // (piece code << 7) | square
+    castle: pair(16),        // the whole 4-bit mask, so repeated clears are safe
+    epFile: pair(8),
+    sideLo: word(),
+    sideHi: word(),
+  };
+})();
+
+const pieceIndex = (piece, square) => (piece << 7) | square;
 
 export class FastBoard {
   constructor(fen) {
@@ -84,6 +115,38 @@ export class FastBoard {
     this.half = Number(half) || 0;
     this.undoStack.length = 0;
     this.ply = 0;
+    this.rehash();
+  }
+
+  // Recompute the key from scratch. Called once when a position is loaded, and
+  // by the test that proves the incremental updates never drift.
+  rehash() {
+    let lo = 0;
+    let hi = 0;
+    for (let sq = 0; sq < 128; sq++) {
+      if (sq & 0x88) { sq += 7; continue; }
+      const piece = this.squares[sq];
+      if (piece === EMPTY) continue;
+      const i = pieceIndex(piece, sq);
+      lo ^= ZOBRIST.piece.lo[i];
+      hi ^= ZOBRIST.piece.hi[i];
+    }
+    lo ^= ZOBRIST.castle.lo[this.castling];
+    hi ^= ZOBRIST.castle.hi[this.castling];
+    if (this.ep >= 0) {
+      const f = fileOf(this.ep);
+      lo ^= ZOBRIST.epFile.lo[f];
+      hi ^= ZOBRIST.epFile.hi[f];
+    }
+    if (this.turn !== WHITE) { lo ^= ZOBRIST.sideLo; hi ^= ZOBRIST.sideHi; }
+    this.keyLo = lo | 0;
+    this.keyHi = hi | 0;
+  }
+
+  #xorPiece(piece, square) {
+    const i = pieceIndex(piece, square);
+    this.keyLo ^= ZOBRIST.piece.lo[i];
+    this.keyHi ^= ZOBRIST.piece.hi[i];
   }
 
   /* ---------- attacks ---------- */
@@ -271,7 +334,15 @@ export class FastBoard {
     this.undoStack.push({
       move, captured, capturedSq,
       castling: this.castling, ep: this.ep, half: this.half,
+      keyLo: this.keyLo, keyHi: this.keyHi,
     });
+
+    const castlingBefore = this.castling;
+    const epBefore = this.ep;
+    const placed = promo ? (promo | (us << 3)) : piece;
+    if (captured !== EMPTY) this.#xorPiece(captured, capturedSq);
+    this.#xorPiece(piece, from);
+    this.#xorPiece(placed, to);
 
     this.squares[capturedSq] = EMPTY;
     this.squares[from] = EMPTY;
@@ -282,10 +353,19 @@ export class FastBoard {
       this.castling &= us === WHITE ? ~(CASTLE_WK | CASTLE_WQ) : ~(CASTLE_BK | CASTLE_BQ);
       if (kind === KIND_CASTLE) {
         // shuffle the rook across
-        if (to === 6) { this.squares[5] = this.squares[7]; this.squares[7] = EMPTY; }
-        else if (to === 2) { this.squares[3] = this.squares[0]; this.squares[0] = EMPTY; }
-        else if (to === 118) { this.squares[117] = this.squares[119]; this.squares[119] = EMPTY; }
-        else if (to === 114) { this.squares[115] = this.squares[112]; this.squares[112] = EMPTY; }
+        let rookFrom = -1;
+        let rookTo = -1;
+        if (to === 6) { rookFrom = 7; rookTo = 5; }
+        else if (to === 2) { rookFrom = 0; rookTo = 3; }
+        else if (to === 118) { rookFrom = 119; rookTo = 117; }
+        else if (to === 114) { rookFrom = 112; rookTo = 115; }
+        if (rookFrom >= 0) {
+          const rook = this.squares[rookFrom];
+          this.squares[rookTo] = rook;
+          this.squares[rookFrom] = EMPTY;
+          this.#xorPiece(rook, rookFrom);
+          this.#xorPiece(rook, rookTo);
+        }
       }
     }
 
@@ -299,6 +379,25 @@ export class FastBoard {
     this.half = (type === PAWN || captured !== EMPTY) ? 0 : this.half + 1;
     this.turn ^= 1;
     this.ply++;
+
+    // The castling mask is folded as a whole, because the clears above are
+    // idempotent and XORing per bit would undo itself on a repeat.
+    if (this.castling !== castlingBefore) {
+      this.keyLo ^= ZOBRIST.castle.lo[castlingBefore] ^ ZOBRIST.castle.lo[this.castling];
+      this.keyHi ^= ZOBRIST.castle.hi[castlingBefore] ^ ZOBRIST.castle.hi[this.castling];
+    }
+    if (epBefore >= 0) {
+      const f = fileOf(epBefore);
+      this.keyLo ^= ZOBRIST.epFile.lo[f];
+      this.keyHi ^= ZOBRIST.epFile.hi[f];
+    }
+    if (this.ep >= 0) {
+      const f = fileOf(this.ep);
+      this.keyLo ^= ZOBRIST.epFile.lo[f];
+      this.keyHi ^= ZOBRIST.epFile.hi[f];
+    }
+    this.keyLo ^= ZOBRIST.sideLo;
+    this.keyHi ^= ZOBRIST.sideHi;
   }
 
   unmake() {
@@ -331,6 +430,8 @@ export class FastBoard {
     this.castling = undo.castling;
     this.ep = undo.ep;
     this.half = undo.half;
+    this.keyLo = undo.keyLo;
+    this.keyHi = undo.keyHi;
   }
 
   // Make only if the move leaves our own king safe. Returns false (and leaves

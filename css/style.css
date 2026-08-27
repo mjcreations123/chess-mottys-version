@@ -35,7 +35,6 @@ body {
   --magic-light: #ff9a85;
   --turn: #e4b75d;
   --danger: #ee7468;
-  --risk: #63d3ee;
   --sq-light: #d9d3c2;
   --sq-dark: #667b89;
   --move: rgba(231, 190, 83, .58);
@@ -180,30 +179,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
   0%, 100% { box-shadow: inset 0 0 0 3px var(--magic), inset 0 0 15px rgba(255, 115, 88, .5); }
   50% { box-shadow: inset 0 0 0 5px var(--magic-light), inset 0 0 22px rgba(255, 115, 88, .72); }
 }
-/* One of your own pieces that would redeem a claim of theirs: lose it and
-   they get a piece back for free. Sits in the corner so it never fights the
-   piece for attention. */
-.sq--at-risk::after {
-  content: "";
-  position: absolute;
-  top: 7%;
-  right: 7%;
-  width: 15%;
-  height: 15%;
-  border-radius: 50%;
-  background: var(--risk);
-  box-shadow: 0 0 0 2px rgba(16, 19, 21, .45);
-}
-/* An empty home square, standing ready to receive a returning piece. */
-.sq--home-open::before {
-  content: "";
-  position: absolute;
-  inset: 34%;
-  border-radius: 50%;
-  border: 2px dashed var(--magic-light);
-  opacity: .72;
-}
-.sq--home-choice.sq--home-open::before { display: none; }
 .sq--homecoming { animation: square-homecoming .56s ease-out; }
 /* The piece that was taken and then given back. */
 .sq--spared { box-shadow: inset 0 0 0 4px var(--turn); }
@@ -357,6 +332,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   flex-wrap: wrap;
 }
 .board-action[hidden] { display: none; }
+.board-action[data-phase="offer"] { border-left-color: var(--magic); }
+.board-action[data-phase="offer"] svg { color: var(--magic); }
 .board-action svg { width: 24px; height: 24px; flex: 0 0 24px; color: var(--turn); fill: none; stroke: currentColor; stroke-width: 1.7; }
 .board-action div { min-width: 0; }
 .board-action strong { display: block; font-size: 14px; line-height: 1.2; }
@@ -523,8 +500,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .legend-key { width: 18px; height: 18px; border-radius: 50%; }
 .legend-key--offer { border: 3px solid var(--magic); }
-.legend-key--home { border: 2px dashed var(--magic-light); transform: scale(.7); }
-.legend-key--risk { background: var(--risk); transform: scale(.42); box-shadow: 0 0 0 5px rgba(16, 19, 21, .45); }
 .review-nav {
   display: flex;
   align-items: center;
@@ -830,8 +805,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .board:focus { outline: 3px solid Highlight; outline-offset: 2px; }
   .sq--home-choice { outline: 2px dashed Highlight; outline-offset: -4px; }
   .sq--offer { outline: 3px solid Highlight; outline-offset: -3px; }
-  .sq--home-open::before { border-color: Highlight; }
-  .sq--at-risk::after { background: Highlight; }
   .chip--ready { outline: 2px solid Highlight; }
 }
 

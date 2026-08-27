@@ -21,8 +21,19 @@ const falling = (field) => ORDER.every((level, i) => i === 0
 {
   assert(rising('maxDepth'), 'search depth does not rise with difficulty');
   assert(rising('timeMs'), 'thinking time does not rise with difficulty');
-  assert(falling('scoreNoise'), 'the haze does not thin out as difficulty rises');
-  assert(LEVELS.hard.scoreNoise === 0, 'Expert must see the position clearly');
+  assert(LEVELS.easy.mistakeChance > LEVELS.hard.mistakeChance
+    && LEVELS.medium.mistakeChance > LEVELS.hard.mistakeChance,
+    'Expert must make fewer mistakes than either weaker level');
+  assert(LEVELS.hard.mistakeChance === 0, 'Expert must not make mistakes on purpose');
+  assert(LEVELS.easy.quietDepth < LEVELS.medium.quietDepth, 'Casual must be the blindest to an exchange');
+  assert(LEVELS.hard.quietDepth === -1, 'Expert must follow an exchange to the end');
+  // Casual runs with no quiescence at all, so the PARITY of its search depth
+  // decides who gets the last word in an exchange. On an even depth it stops
+  // recapturing, which reads as broken rather than weak, and no current test
+  // would notice.
+  assert((LEVELS.easy.maxDepth + LEVELS.easy.endgameBonus) % 2 === 1
+    && LEVELS.easy.maxDepth % 2 === 1,
+    'Casual searches to an even depth with no quiescence, so it will stop recapturing');
   assert(ORDER.every((level) => LEVELS[level].probeDepth === LEVELS.hard.probeDepth),
     'the levels judge a homecoming to different depths; the rules are not a difficulty setting');
   assert(LEVELS.easy.label === 'Casual' && LEVELS.medium.label === 'Average'
@@ -39,7 +50,7 @@ const falling = (field) => ORDER.every((level, i) => i === 0
   const depths = {};
   for (const level of ORDER) {
     const stats = {};
-    think(fen, level, 'depth-probe', { stats, scoreNoise: 0, timeMs: 8000 });
+    think(fen, level, 'depth-probe', { stats, mistakeChance: 0, timeMs: 8000 });
     depths[level] = stats.completedDepth || 0;
   }
   console.log(`  depth reached: casual ${depths.easy}, average ${depths.medium}, expert ${depths.hard}`);
@@ -53,8 +64,10 @@ const falling = (field) => ORDER.every((level, i) => i === 0
   ok(`each level searches to its own ceiling (${depths.easy} / ${depths.medium} / ${depths.hard})`);
 }
 
-// The haze. At a fixed horizon the levels must still pick differently: Casual
-// wanders off its own best move often, Average rarely, Expert never.
+// Mistakes. At a fixed horizon the levels must still pick differently, and the
+// shape matters as much as the rate: a weak level plays the move it found MOST
+// of the time and goes properly wrong occasionally. A level that nudged every
+// move a little would score the same here and look aimless on the board.
 {
   const fen = 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4';
   const samples = 200;
@@ -76,14 +89,23 @@ const falling = (field) => ORDER.every((level, i) => i === 0
     variety[level] = choices.size;
   }
   console.log(`  plays its own best move: casual ${accuracy.easy}/${samples}, average ${accuracy.medium}/${samples}, expert ${accuracy.hard}/${samples}`);
-  assert(accuracy.easy < accuracy.medium && accuracy.medium < accuracy.hard,
-    `move precision did not rise with difficulty: ${JSON.stringify(accuracy)}`);
+  console.log(`  distinct moves chosen:   casual ${variety.easy}, average ${variety.medium}, expert ${variety.hard}`);
   assert(accuracy.hard === samples && variety.hard === 1, 'Expert varied away from its best move');
-  assert(accuracy.easy < samples * 0.6,
-    `Casual played its best move ${accuracy.easy}/${samples} times, which is not a haze`);
-  assert(variety.easy > variety.medium && variety.medium > variety.hard,
-    `move variety did not narrow with difficulty: ${JSON.stringify(variety)}`);
-  ok('the haze thins out across the three levels');
+  // The floor here is the whole point of the mistake model. A level that
+  // wanders off its own best move on most turns does not look weak, it looks
+  // like it is not trying, which is the complaint that produced this design.
+  for (const level of ['easy', 'medium']) {
+    assert(accuracy[level] > samples * 0.5,
+      `${level} played its own best move only ${accuracy[level]}/${samples} times, which reads as aimless rather than weak`);
+    assert(accuracy[level] < samples * 0.95,
+      `${level} played its best move ${accuracy[level]}/${samples} times, so it never errs at all`);
+    assert(variety[level] > 1, `${level} never varied its move`);
+  }
+  // Casual and Average deliberately make mistakes at a similar RATE. What
+  // separates them is how far they see and how far they can follow an
+  // exchange, which this fixed-horizon probe cannot measure. The real ladder
+  // is proved by test/level-ladder-probe.mjs, which plays actual games.
+  ok('every level plays its own best move most of the time, and Expert always');
 }
 
 // The floor under Casual. Weak is the target; broken is not. However hazy its
@@ -91,13 +113,16 @@ const falling = (field) => ORDER.every((level, i) => i === 0
 // finishes a mate it can see. Without these two it stops looking like an
 // opponent and starts looking like a bug.
 {
-  const freeQueen = '4k3/8/8/3q4/8/3R4/8/4K3 w - - 0 30';
+  const freeQueen = '4k3/8/8/3q4/8/3R4/8/4K3 w - - 0 30'; // undefended, one move
   let grabbed = 0;
   for (let i = 0; i < 60; i++) {
     const move = think(freeQueen, 'easy', `free-queen-${i}`);
     if (move.from === 'd3' && move.to === 'd5') grabbed++;
   }
-  assert(grabbed >= 57, `Casual walked past a free queen ${60 - grabbed} times in 60`);
+  // Not 60 out of 60: a level that never misses free material is not a weak
+  // player, it is a strong one with bad taste. Missing it now and then is the
+  // mistake model working. Missing it often would be the floor breaking.
+  assert(grabbed >= 52, `Casual walked past a free queen ${60 - grabbed} times in 60`);
 
   const mateIn1 = '6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1';
   let mated = 0;
@@ -115,30 +140,14 @@ const falling = (field) => ORDER.every((level, i) => i === 0
 {
   const fen = '1n2k3/8/8/8/8/8/PPP5/4K3 w - - 0 20';
   const held = { w: [{ type: 'n', homes: ['b1'] }], b: [] };
-  const plain = evaluateFen(fen, held) - evaluateFen(fen, null);
-  const flat = evaluateFen(fen, held, { flatEval: true }) - evaluateFen(fen, null, { flatEval: true });
-  console.log(`  values a dead knight at: ${Math.round(plain)} normally, ${Math.round(flat)} on a flat evaluation`);
-  assert(plain > 0, 'a live claim is worth nothing');
-  assert(Math.abs(plain - flat) < 1,
-    `Casual's flat evaluation changed what the house rule is worth: ${Math.round(plain)} vs ${Math.round(flat)}`);
+  const worth = evaluateFen(fen, held) - evaluateFen(fen, null);
+  console.log(`  values a dead knight with a clear home at: ${Math.round(worth)}`);
+  assert(worth > 0, 'a live claim is worth nothing');
+  // There is no per-level scaling left to drift, so pin that too: the only
+  // thing separating the levels is chess, never their grasp of the rules.
+  assert(ORDER.every((level) => LEVELS[level].claimScale === undefined),
+    'a per-level claimScale came back; every level must value the house rule in full');
   ok('every level values the house rule in full, whatever its skill');
-}
-
-// Casual counts material and nothing else. That is what makes it unskilled
-// rather than merely random: it will not develop, will not tuck its king away,
-// and will not notice a ruined pawn structure, but it still knows a rook is
-// worth more than a knight.
-{
-  const opening = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-  const developed = 'rnbqkbnr/pppppppp/8/8/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 3';
-  const normalGap = evaluateFen(developed, null) - evaluateFen(opening, null);
-  const flatGap = evaluateFen(developed, null, { flatEval: true })
-    - evaluateFen(opening, null, { flatEval: true });
-  assert(Math.abs(normalGap) > 20,
-    `the normal evaluation cannot tell a developed position from the start: ${Math.round(normalGap)}`);
-  assert(Math.abs(flatGap) < 1,
-    `Casual's flat evaluation still has an opinion about development: ${Math.round(flatGap)}`);
-  ok('Casual judges by material alone');
 }
 
 {
