@@ -9,14 +9,25 @@
 // Getting this backwards would make MottyBot systematically donate material.
 
 import { Chess } from '../vendor/chess.js';
-import { think } from './engine-ai.js';
+import { think, LEVELS } from './engine-ai.js';
 
 export function scoreForDecider(fen, level, seed, probeMs, vouchers) {
   const chess = new Chess(fen);
   if (chess.isCheckmate()) return 1000000; // the opponent is mated: perfect
   if (chess.isStalemate()) return 0;       // a dead draw
   const stats = {};
-  think(fen, level, seed, { stats, blunderChance: 0, endgameBonus: 0, timeMs: probeMs, vouchers });
+  // The probe is capped by depth as well as by the clock. A clock alone makes
+  // the difficulty ladder depend on how busy the machine is, which quietly
+  // turns Casual's exchange judgment into Expert's on a fast phone.
+  const config = LEVELS[level] || LEVELS.medium;
+  think(fen, level, seed, {
+    stats,
+    scoreNoise: 0,
+    endgameBonus: 0,
+    timeMs: probeMs,
+    ...(config.probeDepth ? { maxDepth: config.probeDepth } : {}),
+    vouchers,
+  });
   return -(stats.score ?? 0);
 }
 

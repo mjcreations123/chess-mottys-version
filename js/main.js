@@ -17,11 +17,11 @@ const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const BOTS = {
   easy: {
     name: 'MottyBot', label: 'Casual', level: 'easy', minThink: 600,
-    blurb: 'Makes a quick plan, but sometimes backs the wrong move or trade.',
+    blurb: 'Looks one move ahead and misreads plenty. Good for learning the rule.',
   },
   medium: {
-    name: 'MottyBot', label: 'Club', level: 'medium', minThink: 900,
-    blurb: 'Reads farther ahead and usually punishes a loose piece or a bad trade.',
+    name: 'MottyBot', label: 'Average', level: 'medium', minThink: 900,
+    blurb: 'Thinks several moves ahead and takes whatever you leave loose.',
   },
   hard: {
     name: 'MottyBot', label: 'Expert', level: 'hard', minThink: 1200,

@@ -97,20 +97,26 @@ for (let r = 0; r < 8; r++) {
 const pstIndex = (sq, color) => (color === WHITE ? (7 - rankOf(sq)) * 8 + fileOf(sq) : rankOf(sq) * 8 + fileOf(sq));
 
 /* ---------------- levels ---------------- */
-// Three genuinely different opponents. Depth and time set the ceiling; the
-// blunder settings decide how often the weaker ones fail to use it.
+// Three genuinely different opponents. They differ along three axes on
+// purpose, because depth alone does not separate them: with captures resolved
+// at every leaf, even a two-ply search never hangs a piece, which is why the
+// old Casual beat a careful beginner in 96 games out of 100.
+//
+//   maxDepth   how far ahead it looks
+//   scoreNoise how clearly it sees what it looked at
+//   claimScale how well it understands this week's house rule
 export const LEVELS = {
   easy: {
-    label: 'Casual', maxDepth: 2, timeMs: 400,
-    blunderChance: 0.30, spread: 120, endgameBonus: 2,
+    label: 'Casual', maxDepth: 1, timeMs: 300,
+    scoreNoise: 260, endgameBonus: 2, claimScale: 0.25, probeDepth: 1,
   },
   medium: {
-    label: 'Club', maxDepth: 6, timeMs: 1400,
-    blunderChance: 0.06, spread: 45, endgameBonus: 6,
+    label: 'Average', maxDepth: 5, timeMs: 1100,
+    scoreNoise: 40, endgameBonus: 4, claimScale: 0.7, probeDepth: 3,
   },
   hard: {
     label: 'Expert', maxDepth: 24, timeMs: 4500,
-    blunderChance: 0, spread: 0, endgameBonus: 12,
+    scoreNoise: 0, endgameBonus: 12, claimScale: 1, probeDepth: 5,
   },
 };
 
@@ -127,8 +133,8 @@ const TYPE_CODE = { n: KNIGHT, b: BISHOP, r: ROOK, q: QUEEN };
 
 // Turn the match's graveyards into something the 0x88 board can read fast.
 // Duplicate claims on one kind decay, because a single turn redeems one.
-export function compileClaims(vouchers) {
-  if (!vouchers) return null;
+export function compileClaims(vouchers, scale = 1) {
+  if (!vouchers || scale <= 0) return null;
   const side = (list) => {
     const seen = new Map();
     const out = [];
@@ -140,7 +146,7 @@ export function compileClaims(vouchers) {
       out.push({
         type,
         homes: entry.homes.map(nameToSquare),
-        weight: 1 / (rank + 1),
+        weight: scale / (rank + 1),
       });
     }
     return out;
@@ -241,10 +247,18 @@ function evaluate(board) {
 }
 
 // A testing seam: the static verdict on one position, with no search at all.
-export function evaluateFen(fen, vouchers) {
+export function evaluateFen(fen, vouchers, claimScale = 1) {
   const board = new FastBoard(fen);
-  board.claims = compileClaims(vouchers);
+  board.claims = compileClaims(vouchers, claimScale);
   return evaluate(board);
+}
+
+// Box-Muller on the seeded generator, so a level's sloppiness is reproducible
+// for a given game seed.
+function gaussian(rng) {
+  const u = 1 - rng.next();
+  const v = rng.next();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
 /* ---------------- search ---------------- */
@@ -380,7 +394,7 @@ export function think(fen, level, seed, opts = {}) {
   const cfg = { ...(LEVELS[level] || LEVELS.medium), ...opts };
   const rng = makeRng(seedFromString(String(seed ?? 'mottybot')));
   const board = new FastBoard(fen);
-  board.claims = compileClaims(cfg.vouchers);
+  board.claims = compileClaims(cfg.vouchers, cfg.claimScale ?? 1);
   const rootMoves = board.legalMoves();
   if (!rootMoves.length) return null;
 
@@ -389,6 +403,7 @@ export function think(fen, level, seed, opts = {}) {
   const search = new Search(board, deadline);
 
   const scored = rootMoves.map((move) => ({ move, score: -Infinity }));
+  const exactRoot = Boolean(cfg.scoreNoise);
   let completedDepth = 0;
 
   for (let depth = 1; depth <= cfg.maxDepth; depth++) {
@@ -402,7 +417,13 @@ export function think(fen, level, seed, opts = {}) {
         const entry = fresh[i];
         board.makeIfLegal(entry.move);
         let score;
-        if (i === 0) {
+        if (i === 0 || exactRoot) {
+          // A hazy level compares root moves against each other, so every one
+          // of them needs a real score. The null window below is faster, but a
+          // move that fails low comes back with an upper BOUND, and several
+          // moves fail low at the same bound: haze those and a level picks a
+          // blunder that scored the same as the best move only because neither
+          // was searched properly.
           score = -search.negamax(depth - 1, -Infinity, Infinity, 1);
         } else {
           score = -search.negamax(depth - 1, -alpha - 1, -alpha, 1);
@@ -434,13 +455,17 @@ export function think(fen, level, seed, opts = {}) {
   scored.sort((a, b) => b.score - a.score);
   let chosen = scored[0];
 
-  // Weaker levels: sometimes settle for a move that is merely playable. Never
-  // throw away a forced mate, and never deliberately walk into one.
-  if (cfg.blunderChance && scored.length > 1 && Math.abs(chosen.score) < MATE_THRESHOLD) {
-    if (rng.next() < cfg.blunderChance) {
-      const cutoff = chosen.score - cfg.spread;
-      const pool = scored.filter((e) => e.score >= cutoff && e.score > -MATE_THRESHOLD);
-      if (pool.length > 1) chosen = pool[rng.int(pool.length)];
+  // Weaker levels see the position through a haze. Every root move's score is
+  // nudged before the best one is picked, so a weak level overlooks things by
+  // degrees the way a person does: usually the second-best move, sometimes a
+  // real mistake. A forced mate is never traded away and a forced loss is
+  // never walked into, so even Casual finishes what it starts.
+  if (cfg.scoreNoise && scored.length > 1 && Math.abs(chosen.score) < MATE_THRESHOLD) {
+    let bestHazed = -Infinity;
+    for (const entry of scored) {
+      if (!Number.isFinite(entry.score) || entry.score <= -MATE_THRESHOLD) continue;
+      const hazed = entry.score + gaussian(rng) * cfg.scoreNoise;
+      if (hazed > bestHazed) { bestHazed = hazed; chosen = entry; }
     }
   }
 

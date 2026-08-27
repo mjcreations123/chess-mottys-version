@@ -112,7 +112,7 @@ const claim = (type, ...homes) => ({ type, homes });
   const held = { w: [claim('q', 'd1'), claim('r', 'a1', 'h1')], b: [] };
 
   const mateIn1 = '6k1/5ppp/8/8/8/7q/5PPP/R5K1 w - - 0 30';
-  const mate = think(mateIn1, 'medium', 'claims-mate', { timeMs: 320, blunderChance: 0, vouchers: held });
+  const mate = think(mateIn1, 'medium', 'claims-mate', { timeMs: 320, scoreNoise: 0, vouchers: held });
   assert(mate && mate.from === 'a1' && mate.to === 'a8',
     `holding a claim, MottyBot missed mate in one and played ${JSON.stringify(mate)}`);
   ok('a claim never outweighs a mate in one');
@@ -121,7 +121,7 @@ const claim = (type, ...homes) => ({ type, homes });
   // queen collects 9 points and kills that claim in the same move. It still
   // has to take it.
   const freeQueen = '4k3/8/8/3q4/8/3R4/8/4K3 w - - 0 30';
-  const grab = think(freeQueen, 'medium', 'claims-grab', { timeMs: 320, blunderChance: 0, vouchers: held });
+  const grab = think(freeQueen, 'medium', 'claims-grab', { timeMs: 320, scoreNoise: 0, vouchers: held });
   assert(grab && grab.from === 'd3' && grab.to === 'd5',
     `holding a claim, MottyBot walked past a free queen and played ${JSON.stringify(grab)}`);
   ok('a claim never outweighs a free queen');
