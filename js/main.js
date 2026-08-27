@@ -48,6 +48,44 @@ const state = {
 
 const board = new BoardView($('board'), { onUserMove: handleUserMove });
 
+/* The board must always be fully visible: it is the whole point of the page.
+   Everything else stacked in the arena is measured and whatever height is
+   left over becomes the board's. The action bar changes height as the game
+   asks different things of you, so this has to be live rather than a guess. */
+const arena = document.querySelector('.arena');
+const boardFrame = document.querySelector('.board-frame');
+const actionBar = $('board-action');
+const ACTION_RESERVE = 118; // tallest action bar, including its margin
+let fitQueued = false;
+function fitBoard() {
+  fitQueued = false;
+  if (matchMedia('(max-width: 1080px)').matches) {
+    arena.style.removeProperty('--board-max');
+    return;
+  }
+  // The action bar comes and goes, so its tallest state is reserved rather
+  // than measured: a board that resizes under the player mid-game is worse
+  // than a strip of empty page below it.
+  let chrome = ACTION_RESERVE;
+  for (const child of arena.children) {
+    if (child === boardFrame || child === actionBar) continue;
+    const style = getComputedStyle(child);
+    if (style.display === 'none') continue;
+    chrome += child.getBoundingClientRect().height
+      + parseFloat(style.marginTop) + parseFloat(style.marginBottom);
+  }
+  const top = arena.getBoundingClientRect().top + window.scrollY;
+  const room = window.innerHeight - top - 30 - chrome;
+  arena.style.setProperty('--board-max', `${Math.max(340, Math.round(room))}px`);
+}
+function queueFit() {
+  if (fitQueued) return;
+  fitQueued = true;
+  requestAnimationFrame(fitBoard);
+}
+addEventListener('resize', queueFit);
+new ResizeObserver(queueFit).observe(document.documentElement);
+
 /* Worker */
 let worker = null;
 let workerSeq = 0;
@@ -113,6 +151,11 @@ async function requestBotMove(fen, level) {
     kind: 'move',
     fen,
     level,
+    // This week's rule, handed to the search: a dead piece with a clear home
+    // and a matching enemy still standing is material MottyBot is owed. Its
+    // own graveyard cannot change on its own move, so this stays true for the
+    // whole search.
+    vouchers: state.match?.vouchers(),
     seed: `${state.match?.seed || 'game'}#bot-move#${state.match?.ply || 0}#${fen}`,
   });
   return result.move;
@@ -120,11 +163,12 @@ async function requestBotMove(fen, level) {
 
 // Ask MottyBot to compare candidate positions: the plain chess move first,
 // then each possible homecoming. Ties keep the plain move.
-async function requestBotChoice(fens) {
+async function requestBotChoice(fens, vouchersList) {
   const probeMs = state.bot.level === 'hard' ? 420 : state.bot.level === 'medium' ? 260 : 140;
   return requestWorker({
     kind: 'choose',
     fens,
+    vouchersList,
     level: state.bot.level,
     probeMs,
     seed: `${state.match?.seed || 'game'}#choose#${state.match?.ply || 0}`,
@@ -172,7 +216,7 @@ function updateCheckMark(fen = state.match?.fen()) {
   board.setCheck(chess.isCheck() ? kingSquare(chess.turn(), fen) : null);
 }
 
-function setThinking(on) { $('top-thinking').hidden = !on; }
+function setThinking(on) { $('top-thinking').hidden = !on; queueFit(); }
 function setPlayerAction(label = null, { phase = 'turn', title = '', copy = '', onCancel = null, buttons = [] } = {}) {
   const tag = $('turn-tag');
   tag.hidden = !label;
@@ -198,6 +242,7 @@ function setPlayerAction(label = null, { phase = 'turn', title = '', copy = '', 
     button.onclick = item.onClick;
     bar.appendChild(button);
   }
+  queueFit();
 }
 function setYourTurn(on) { setPlayerAction(on ? 'Your move' : null); }
 function focusBoard({ keepActionVisible = false } = {}) {
@@ -221,18 +266,18 @@ function showTaunt(line) {
   const bubble = $('bot-taunt');
   if (!bubble) return;
   $('bot-taunt-line').textContent = line;
-  bubble.hidden = false;
+  bubble.dataset.empty = 'false';
   bubble.classList.remove('is-in');
   void bubble.offsetWidth; // restart the entrance animation on repeat lines
   bubble.classList.add('is-in');
   clearTimeout(tauntTimer);
-  tauntTimer = setTimeout(() => { bubble.hidden = true; }, 4400);
+  tauntTimer = setTimeout(() => { bubble.dataset.empty = 'true'; }, 4400);
 }
 
 function clearTaunt() {
   clearTimeout(tauntTimer);
   const bubble = $('bot-taunt');
-  if (bubble) bubble.hidden = true;
+  if (bubble) bubble.dataset.empty = 'true';
 }
 
 // A mating move ends the game outright, so endGame() does that gloating.
@@ -254,56 +299,78 @@ function reactToMove(move, byBot) {
   else if (move.captured) showTaunt(pickTaunt('playerCapture'));
 }
 
-function setTradeStatus({ phase = 'idle', title, copy, route = '' }) {
-  const strip = $('trade-strip');
-  strip.dataset.phase = phase;
-  $('trade-title').textContent = title;
-  $('trade-copy').textContent = copy || '';
-  $('trade-route').textContent = route;
-  $('trade-route').hidden = !route;
+// A transient line on the board action bar. It narrates a homecoming while
+// it plays out; the next setPlayerAction call clears it.
+function showNote(title, copy, phase = 'triggered') {
+  const prompt = $('board-action');
+  prompt.hidden = false;
+  prompt.dataset.phase = phase;
+  $('board-action-title').textContent = title;
+  $('board-action-copy').textContent = copy;
+  $('board-action-cancel').hidden = true;
+  const bar = $('board-action-buttons');
+  bar.innerHTML = '';
+  bar.hidden = true;
+  queueFit();
 }
 
-// The idle strip: what is waiting in the player's graveyard, if anything.
-function showTradeStatus() {
-  const match = state.match;
-  if (!match) return;
-  const waiting = match.graveyard(state.myColor);
-  if (!waiting.length) {
-    setTradeStatus({
-      phase: 'idle',
-      title: 'Every piece remembers home',
-      copy: 'When a knight, bishop, rook or queen of yours falls, capture a matching enemy piece and you may bring yours back instead.',
-    });
-    return;
-  }
-  const names = waiting.map((entry) => PIECE_NAMES[entry.type]);
-  const openCount = waiting.filter((entry) => entry.open.length).length;
-  setTradeStatus({
-    phase: 'armed',
-    title: `Waiting to come home: ${names.join(', ')}`,
-    copy: openCount
-      ? 'Capture a matching enemy piece and you may bring yours back instead of taking theirs.'
-      : 'Every home square is blocked right now. Clear it and a matching capture brings yours back.',
-    route: `${waiting.length} fallen`,
-  });
+// The rail beside each name holds that side's fallen pieces: the ones that
+// can still come home. A chip lights up the moment its home square is clear
+// and a matching enemy piece is on the board, because that is exactly when a
+// capture would bring it back.
+function railHTML(color, mine, delta) {
+  const who = mine ? 'Your' : "MottyBot's";
+  const chips = state.match.graveyard(color).map((entry) => {
+    const name = PIECE_NAMES[entry.type];
+    const where = (entry.open.length ? entry.open : entry.homes).join('/');
+    const cls = entry.ready ? 'ready' : entry.matchOnBoard ? 'blocked' : 'idle';
+    const why = entry.ready ? `ready to come home to ${where}`
+      : entry.matchOnBoard ? `waiting, ${entry.homes.join(' and ')} blocked`
+        : `waiting, no enemy ${name} left to trade for`;
+    return `<span class="chip chip--${cls}" title="${who} ${name}, ${why}">${pieceUse(color, entry.type)}<b>${where}</b><span class="visually-hidden">${who} ${name}, ${why}.</span></span>`;
+  }).join('');
+  const score = delta > 0 ? `<span class="rail__score">+${delta}</span>` : '';
+  return chips + score;
 }
 
-function renderCaptured() {
-  if (!state.match) {
-    $('bottom-captured').innerHTML = '';
-    $('top-captured').innerHTML = '';
-    return;
-  }
+function renderRails() {
+  const top = $('top-rail');
+  const bottom = $('bottom-rail');
+  if (!top || !bottom) return;
+  if (!state.match) { top.innerHTML = ''; bottom.innerHTML = ''; return; }
   const { byWhite, byBlack } = state.match.captured();
-  const diff = byWhite.reduce((sum, type) => sum + VAL[type], 0) - byBlack.reduce((sum, type) => sum + VAL[type], 0);
-  const mine = state.myColor === 'w' ? byWhite : byBlack;
-  const theirs = state.myColor === 'w' ? byBlack : byWhite;
-  const enemyColor = state.myColor === 'w' ? 'b' : 'w';
+  const diff = byWhite.reduce((sum, type) => sum + VAL[type], 0)
+    - byBlack.reduce((sum, type) => sum + VAL[type], 0);
   const myDiff = state.myColor === 'w' ? diff : -diff;
-  $('bottom-captured').innerHTML = mine.map((type) => pieceUse(enemyColor, type)).join('') +
-    (myDiff > 0 ? `<span class="cap-score">+${myDiff}</span>` : '');
-  $('top-captured').innerHTML = theirs.map((type) => pieceUse(state.myColor, type)).join('') +
-    (myDiff < 0 ? `<span class="cap-score">+${-myDiff}</span>` : '');
+  bottom.innerHTML = railHTML(state.myColor, true, myDiff);
+  top.innerHTML = railHTML(opposingColor(state.myColor), false, -myDiff);
+  queueFit();
+}
+
+// Ring the enemy pieces whose capture would bring one of yours home, and mark
+// the home squares waiting to receive them. Only while it is genuinely your
+// move: at any other moment the rings would be pointing at nothing.
+function updateOpportunities() {
+  const live = state.match && !state.over && !reviewing()
+    && (state.screen === 'playing' || state.screen === 'exchange');
+  if (!live) {
+    board.setOpportunities({});
+    return;
+  }
+  // Which of your pieces MottyBot is waiting for stays true on both turns,
+  // and matters most while it is thinking.
+  const risks = state.match.exposedTo(state.myColor);
+  if (state.screen !== 'playing' || state.match.turn() !== state.myColor) {
+    board.setOpportunities({ risks });
+    return;
+  }
+  const { targets, homes } = state.match.offerTargets();
+  board.setOpportunities({ targets: targets.map((item) => item.square), homes, risks });
+}
+
+function renderLive() {
+  renderRails();
+  updateOpportunities();
 }
 
 function persistGame() {
@@ -358,7 +425,7 @@ function panelHome() {
   panel.innerHTML = `
     <div class="desk-head">
       <h1>Nothing you lose is gone for good.</h1>
-      <p>This week's rules: Prisoner Exchange. Every piece remembers its starting square, and a matching capture can bring your dead back home.</p>
+      <p>This week's rules: Prisoner Exchange. Every piece remembers the square it started on, and taking an enemy piece of the same kind can bring yours back to it.</p>
     </div>
     <div class="desk-body">
       ${shared ? `
@@ -378,8 +445,8 @@ function panelHome() {
         </div>` : ''}
       <div class="rule-sequence" role="group" aria-label="How the exchange works">
         <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Lose a piece</strong><p>It waits in your graveyard, remembering the square it started on.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Capture its twin</strong><p>Take an enemy piece of the same kind, anywhere on the board.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Or bring yours home</strong><p>Undo the take: their piece lives, and yours returns to its starting square.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Take its twin</strong><p>Capture an enemy piece of the same kind. The capture plays out as normal.</p></div></div>
+        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Then choose</strong><p>Keep it, or take the whole move back: their piece lives and yours walks home.</p></div></div>
       </div>
       <div class="button-stack">
         <button class="btn btn--primary" id="choose-game">
@@ -463,9 +530,13 @@ function panelPlaying() {
   panel.innerHTML = `
     <div class="desk-head">
       <div class="match-title"><h2>${escapeHTML(state.bot.name)}</h2><span class="difficulty-label">${escapeHTML(state.bot.label)} difficulty</span></div>
-      <p>Capture a piece that matches one of your dead, and you may bring yours home instead of taking theirs.</p>
+      <p>Capture a piece that matches one of your dead, and you may undo the capture and bring yours home to its starting square instead.</p>
     </div>
-    <div class="graveyards" id="graveyards"></div>
+    <div class="desk-legend">
+      <p><span class="legend-key legend-key--offer" aria-hidden="true"></span>A ringed enemy piece can be taken to bring one of yours home.</p>
+      <p><span class="legend-key legend-key--home" aria-hidden="true"></span>A dotted square is a home that could be filled this very turn.</p>
+      <p><span class="legend-key legend-key--risk" aria-hidden="true"></span>A marked piece of yours is the one MottyBot is waiting to take.</p>
+    </div>
     <div class="review-nav" role="group" aria-label="Step back through the game">
       <button id="review-first" type="button" aria-label="First position">|&lsaquo;</button>
       <button id="review-prev" type="button" aria-label="Previous position">&lsaquo;</button>
@@ -484,7 +555,7 @@ function panelPlaying() {
   $('review-prev').onclick = () => stepReview(-1);
   $('review-next').onclick = () => stepReview(1);
   $('review-live').onclick = () => exitReview();
-  renderGraveyards();
+  renderLive();
   renderMoveList();
   updateReviewNav();
 }
@@ -505,24 +576,6 @@ function panelPostGame() {
   renderMoveList();
   $('review-game').onclick = enterReplay;
   $('post-new').onclick = panelSetup;
-}
-
-// The two graveyards, in full view: this variant has no secrets.
-function renderGraveyards() {
-  const wrap = $('graveyards');
-  if (!wrap || !state.match) return;
-  const row = (label, color) => {
-    const waiting = state.match.graveyard(color);
-    const items = waiting.length
-      ? `<ul>${waiting.map((entry) => {
-        const open = entry.open.length > 0;
-        const where = open ? `${entry.open.join(' or ')} open` : `${entry.homes.join(' and ')} blocked`;
-        return `<li class="${open ? 'is-open' : ''}" aria-label="${PIECE_NAMES[entry.type]}, ${where}">${pieceUse(color, entry.type)}<span>${where}</span></li>`;
-      }).join('')}</ul>`
-      : '<span class="empty-note">Nothing waiting</span>';
-    return `<div class="graveyard-row"><strong>${label}</strong>${items}</div>`;
-  };
-  wrap.innerHTML = row('Your fallen', state.myColor) + row("MottyBot's", state.myColor === 'w' ? 'b' : 'w');
 }
 
 function renderMoveList() {
@@ -592,6 +645,7 @@ function stepReview(delta, { absolute = false } = {}) {
     copy: `${frame.label}. ${frame.detail}. The game is still waiting for you.`,
     buttons: [{ label: 'Back to the live position', kind: 'btn--primary', onClick: () => exitReview() }],
   });
+  renderLive();
   updateReviewNav();
   markReviewedRow();
   announce(`Reviewing ${frame.label}. ${frame.detail}. Position ${next + 1} of ${frames.length}.`);
@@ -608,9 +662,7 @@ function exitReview() {
   else if (lastMove?.kind === 'resurrect') board.setLastMove(lastMove.declined.victimSquare, lastMove.home);
   else board.setLastMove(null);
   updateCheckMark();
-  renderCaptured();
-  renderGraveyards();
-  showTradeStatus();
+  renderLive();
   updateReviewNav();
   markReviewedRow();
   if (!state.over && state.screen === 'playing' && state.match.turn() === state.myColor) {
@@ -656,7 +708,7 @@ function configureBoardForMatch() {
   $('top-detail').textContent = `${state.bot.label} difficulty`;
   $('bottom-name').textContent = 'You';
   $('bottom-detail').textContent = state.myColor === 'w' ? 'White' : 'Black';
-  renderCaptured();
+  renderLive();
 }
 
 function opposingColor(color) { return color === 'w' ? 'b' : 'w'; }
@@ -679,7 +731,7 @@ function startBotGame(level, myColor, { seed = randomSeed() } = {}) {
   resetTaunts();
   clearTaunt();
   panelPlaying();
-  showTradeStatus();
+  renderLive();
   persistGame();
   showTaunt(pickTaunt('greeting', { always: true }));
   botLoop(serial);
@@ -703,7 +755,7 @@ function resumeGame(data) {
     resetTaunts();
     clearTaunt();
     panelPlaying();
-    showTradeStatus();
+    renderLive();
     persistGame();
     showTaunt(pickTaunt('greeting', { always: true }));
     botLoop(serial);
@@ -730,9 +782,8 @@ async function playMoveAnimation(move, { instant = false } = {}) {
   if (reviewing()) {
     // The move still happens; the reviewer just is not looking at it.
     state.animating = false;
-    renderCaptured();
+    renderLive();
     renderMoveList();
-    renderGraveyards();
     updateReviewNav();
     return state.match === match && state.serial === serial && !state.over;
   }
@@ -746,10 +797,8 @@ async function playMoveAnimation(move, { instant = false } = {}) {
   if (state.over) return false;
   board.setLastMove(move.from, move.to);
   syncBoard();
-  renderCaptured();
+  renderLive();
   renderMoveList();
-  renderGraveyards();
-  showTradeStatus();
   updateCheckMark();
   updateReviewNav();
   return true;
@@ -765,12 +814,11 @@ async function playHomecoming(event, byBot) {
   state.animating = true;
 
   if (!reviewing() && undone) {
-    setTradeStatus({
-      phase: 'selecting',
-      title: byBot ? 'MottyBot takes it back' : 'Taking it back',
-      copy: `The ${PIECE_NAMES[undone.captured]} on ${event.declined.victimSquare} is spared.`,
-      route: event.declined.victimSquare,
-    });
+    showNote(
+      byBot ? 'MottyBot takes it back' : 'Taking it back',
+      `The ${PIECE_NAMES[undone.captured]} on ${event.declined.victimSquare} is spared.`,
+      'selecting',
+    );
     sound.move();
     await board.animateUndoCapture({
       from: undone.from,
@@ -796,24 +844,19 @@ async function playResurrection(event, byBot) {
   const pieceName = PIECE_NAMES[event.piece];
   const victimName = PIECE_NAMES[event.declined.victimType];
   sound.homecoming();
-  setTradeStatus({
-    phase: 'triggered',
-    title: byBot
-      ? `MottyBot's ${pieceName} came home to ${event.home}`
+  showNote(
+    byBot ? `MottyBot's ${pieceName} came home to ${event.home}`
       : `Your ${pieceName} came home to ${event.home}`,
-    copy: byBot
-      ? `It spared your ${victimName} on ${event.declined.victimSquare} to do it.`
+    byBot ? `It spared your ${victimName} on ${event.declined.victimSquare} to do it.`
       : `You spared MottyBot's ${victimName} on ${event.declined.victimSquare} to do it.`,
-    route: event.home,
-  });
+  );
   announce(byBot
     ? `MottyBot declined the capture on ${event.declined.victimSquare}. Its ${pieceName} returned to ${event.home}.`
     : `You declined the capture. Your ${pieceName} returned to ${event.home}.`);
   if (reviewing()) {
     state.animating = false;
-    renderCaptured();
+    renderLive();
     renderMoveList();
-    renderGraveyards();
     updateReviewNav();
     return state.match === match && state.serial === serial && !state.over;
   }
@@ -823,13 +866,23 @@ async function playResurrection(event, byBot) {
   if (state.over) return false;
   board.setLastMove(event.declined.victimSquare, event.home);
   syncBoard();
-  renderCaptured();
+  renderLive();
   renderMoveList();
-  renderGraveyards();
   updateCheckMark();
   updateReviewNav();
   showTaunt(pickTaunt(byBot ? 'botReturn' : 'playerReturn', { always: true }));
   return true;
+}
+
+// The graveyards as they would stand after one candidate action. A homecoming
+// spends the very claim it redeems, so weighing every candidate against the
+// graveyards as they are now would let MottyBot count that claim twice.
+function vouchersAfter(match, action) {
+  try {
+    return replayMatch(match.seed, [...match.serializedActions(), action]).vouchers();
+  } catch {
+    return match.vouchers();
+  }
 }
 
 // Every way MottyBot could bring a piece home this turn. Two different
@@ -846,7 +899,15 @@ function collectBotAlternatives(match) {
       if (seen.has(home)) continue;
       seen.add(home);
       const fen = resurrectionFen(match.fen(), options.victimType, color, home);
-      if (fen) alternatives.push({ capture: { from: move.from, to: move.to, promotion: move.promotion }, home, fen });
+      if (!fen) continue;
+      const capture = { from: move.from, to: move.to, promotion: move.promotion };
+      const uci = move.from + move.to + (move.promotion || '');
+      alternatives.push({
+        capture,
+        home,
+        fen,
+        vouchers: vouchersAfter(match, { kind: 'resurrect', uci, home }),
+      });
     }
   }
   return alternatives;
@@ -868,7 +929,7 @@ async function botLoop(serial) {
       if (reviewing()) return; // the board stays rewound until they come back
       setYourTurn(true);
       board.setInteractive(state.myColor, (square) => match.legalMoves(square));
-      showTradeStatus();
+      renderLive();
       announce(status.check ? 'Your king is in check. Your move.' : 'Your move.');
       return;
     }
@@ -890,7 +951,12 @@ async function botLoop(serial) {
         const preview = new Chess(match.fen());
         preview.move({ from: candidate.from, to: candidate.to, promotion: candidate.promotion || undefined });
         const fens = [preview.fen(), ...alternatives.map((alt) => alt.fen)];
-        const choice = await requestBotChoice(fens);
+        const plainUci = candidate.from + candidate.to + (candidate.promotion || '');
+        const vouchersList = [
+          vouchersAfter(match, { kind: 'move', uci: plainUci }),
+          ...alternatives.map((alt) => alt.vouchers),
+        ];
+        const choice = await requestBotChoice(fens, vouchersList);
         if (state.over || state.match !== match || state.serial !== serial) return;
         if (choice.index > 0) {
           const alt = alternatives[choice.index - 1];
@@ -1005,7 +1071,7 @@ function beginExchangeChoice(options, move) {
     setPlayerAction(null);
     match.keepCapture();
     persistGame();
-    showTradeStatus();
+    renderLive();
     updateReviewNav();
     reactToMove(move, false);
     botLoop(serial);
@@ -1062,12 +1128,6 @@ function beginExchangeChoice(options, move) {
       { label: 'Undo, bring mine home', kind: 'btn--magic', onClick: bringHome },
     ],
   });
-  setTradeStatus({
-    phase: 'selecting',
-    title: 'A homecoming is on the table',
-    copy: `Undo the capture and your dead ${victimName} returns to ${homes.join(' or ')}.`,
-    route: homes.join(' '),
-  });
   announce(`You took the ${victimName} on ${options.victimSquare}. Keep it, or undo the capture and bring your own ${victimName} home to ${homes.join(' or ')}. Choose on the action bar.`);
   focusBoard({ keepActionVisible: true });
 }
@@ -1107,7 +1167,7 @@ function endGame() {
   setYourTurn(false);
   clearActive();
 
-  setTradeStatus({ phase: 'idle', title: 'Game over', copy: 'Review the game or start a new one.' });
+  board.setOpportunities({});
   const outcome = outcomeFor(status);
   if (!state.resultRecorded) {
     recordResult(outcome);
@@ -1264,11 +1324,6 @@ function setReplayFrame(index) {
   $('replay-prev').disabled = state.replay.index === 0;
   $('replay-next').disabled = state.replay.index === max;
   $('replay-end').disabled = state.replay.index === max;
-  if (frame.kind === 'resurrect') {
-    setTradeStatus({ phase: 'triggered', title: frame.label.replace(/^\S+ /, ''), copy: frame.detail, route: frame.to });
-  } else {
-    setTradeStatus({ title: frame.label, copy: frame.detail });
-  }
 }
 
 function exitReplay() {
@@ -1277,7 +1332,7 @@ function exitReplay() {
   board.setPosition(positionMap());
   board.setLastMove(null);
   updateCheckMark();
-  showTradeStatus();
+  renderLive();
   panelPostGame();
 }
 
@@ -1331,9 +1386,9 @@ function showRules() {
       <ol class="rule-list">
         <li><span class="rule-mark">1</span><span><b>Every piece remembers home.</b> The square it stood on at move one.</span></li>
         <li><span class="rule-mark">2</span><span><b>Your dead wait in a graveyard.</b> Knights, bishops, rooks and queens. Pawns are ordinary chess pawns: once captured, they are gone.</span></li>
-        <li><span class="rule-mark">3</span><span><b>Capture a matching piece and choose.</b> Take it off the board like normal chess, or spare it: their piece stays where it stood, your dead piece of the same kind returns to its starting square, and your turn ends.</span></li>
-        <li><span class="rule-mark">4</span><span><b>Home must be empty.</b> If the starting square is occupied, that piece cannot come back yet. A promoted piece that dies waits like any other and returns to the standard square of its kind.</span></li>
-        <li><span class="rule-mark">5</span><span><b>No limits.</b> Every fresh matching capture is another chance, and each return uses up one dead piece.</span></li>
+        <li><span class="rule-mark">3</span><span><b>Capture a matching piece, then choose.</b> The capture plays out first, exactly as it would in normal chess. Then you decide: keep it, or take the whole move back. Take it back and their piece stands again untouched, your capturing piece returns to the square it came from, your dead piece of that kind walks home instead, and your turn ends there.</span></li>
+        <li><span class="rule-mark">4</span><span><b>Home is the square it started on.</b> Not any square of that kind: the a1 rook comes back to a1, the b8 knight to b8. If that square is occupied, that piece cannot come back yet. A promoted piece that dies waits like any other and returns to the standard square of its kind.</span></li>
+        <li><span class="rule-mark">5</span><span><b>No limits, and MottyBot plays the same way.</b> Every fresh matching capture is another chance, each return uses up one dead piece, and MottyBot will take its own pieces back the moment you let it.</span></li>
         <li><span class="rule-mark">6</span><span><b>Everything else is chess.</b> Check, checkmate, castling, promotion. Draws: stalemate, threefold repetition, the fifty-move rule, or nothing left but the two kings. A returned rook cannot castle, and in check a return must block the check.</span></li>
       </ol>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>

@@ -35,6 +35,7 @@ body {
   --magic-light: #ff9a85;
   --turn: #e4b75d;
   --danger: #ee7468;
+  --risk: #63d3ee;
   --sq-light: #d9d3c2;
   --sq-dark: #667b89;
   --move: rgba(231, 190, 83, .58);
@@ -130,9 +131,14 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .arena { min-width: 0; }
 .board-frame { position: relative; }
 .board {
-  width: min(680px, calc(100dvh - 248px), calc(100vw - 446px));
+  height: min(680px, var(--board-max, calc(100dvh - 260px)), calc(100vw - 446px));
+  /* A rail wraps to a second row when a fifth piece dies, which takes a
+     little height off the board. Ease it so it reads as the layout settling
+     rather than a glitch. */
+  transition: height .24s ease;
+  width: auto;
   max-width: 100%;
-  min-width: 420px;
+  min-height: 340px;
   aspect-ratio: 1;
   position: relative;
   overflow: hidden;
@@ -164,6 +170,40 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 @keyframes home-choice { to { transform: scale(.8); opacity: .7; } }
 .sq--home-choice:hover { box-shadow: inset 0 0 0 5px var(--magic); }
+/* Take this piece and one of yours can come home. The ring sits under the
+   piece, so the piece itself is never obscured. */
+.sq--offer {
+  box-shadow: inset 0 0 0 3px var(--magic), inset 0 0 15px rgba(255, 115, 88, .5);
+  animation: offer-ring 1.6s ease-in-out infinite;
+}
+@keyframes offer-ring {
+  0%, 100% { box-shadow: inset 0 0 0 3px var(--magic), inset 0 0 15px rgba(255, 115, 88, .5); }
+  50% { box-shadow: inset 0 0 0 5px var(--magic-light), inset 0 0 22px rgba(255, 115, 88, .72); }
+}
+/* One of your own pieces that would redeem a claim of theirs: lose it and
+   they get a piece back for free. Sits in the corner so it never fights the
+   piece for attention. */
+.sq--at-risk::after {
+  content: "";
+  position: absolute;
+  top: 7%;
+  right: 7%;
+  width: 15%;
+  height: 15%;
+  border-radius: 50%;
+  background: var(--risk);
+  box-shadow: 0 0 0 2px rgba(16, 19, 21, .45);
+}
+/* An empty home square, standing ready to receive a returning piece. */
+.sq--home-open::before {
+  content: "";
+  position: absolute;
+  inset: 34%;
+  border-radius: 50%;
+  border: 2px dashed var(--magic-light);
+  opacity: .72;
+}
+.sq--home-choice.sq--home-open::before { display: none; }
 .sq--homecoming { animation: square-homecoming .56s ease-out; }
 /* The piece that was taken and then given back. */
 .sq--spared { box-shadow: inset 0 0 0 4px var(--turn); }
@@ -258,9 +298,42 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .playerbar__identity { min-width: 88px; }
 .playerbar__identity strong { display: block; font-size: 15px; line-height: 1.2; }
 .playerbar__identity span { display: block; margin-top: 2px; color: var(--quiet); font-size: 12px; line-height: 1.2; }
-.captured { display: flex; align-items: center; min-width: 0; margin-right: auto; }
-.captured svg { width: 18px; height: 18px; margin-left: -3px; }
-.cap-score { margin-left: 4px; color: var(--muted); font-size: 12px; font-weight: 700; }
+/* Each side's fallen pieces, right where you look during a game. Under this
+   week's rules these matter far more than the pieces you have taken. */
+.rail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  margin-right: auto;
+  padding: 3px 0;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 1px 6px 1px 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--quiet);
+  white-space: nowrap;
+}
+.chip svg { width: 19px; height: 19px; opacity: .55; }
+.chip b { font-weight: 700; }
+.chip--blocked { border-style: dashed; }
+.chip--ready {
+  border-color: var(--magic);
+  background: color-mix(in srgb, var(--magic) 17%, var(--surface-2));
+  color: var(--text);
+  box-shadow: 0 0 11px rgba(255, 115, 88, .28);
+}
+.chip--ready svg { opacity: 1; }
+.rail__score { margin-left: 3px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .turn-state {
   background: var(--turn);
   color: #211a0c;
@@ -287,7 +360,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .board-action svg { width: 24px; height: 24px; flex: 0 0 24px; color: var(--turn); fill: none; stroke: currentColor; stroke-width: 1.7; }
 .board-action div { min-width: 0; }
 .board-action strong { display: block; font-size: 14px; line-height: 1.2; }
-.board-action span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.3; }
+.board-action span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
 .board-action__cancel {
   min-width: 60px;
   min-height: 44px;
@@ -311,33 +393,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .think-state::after { content: ""; display: inline-block; width: 24px; height: 2px; margin-left: 8px; vertical-align: middle; background: var(--magic); animation: think 1s steps(3,end) infinite; transform-origin: left; }
 @keyframes think { 0% { transform: scaleX(.25); opacity: .45; } 50% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(.25); opacity: .45; } }
 
-.trade-strip {
-  min-height: 66px;
-  margin-top: 8px;
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--magic);
-  background: var(--surface);
-  border-radius: 7px;
-  display: grid;
-  grid-template-columns: 30px 1fr auto;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 13px 10px 11px;
-}
-.trade-strip[data-phase="selecting"] { border-left-color: var(--turn); }
-.trade-strip[data-phase="selecting"] .trade-strip__icon { color: var(--turn); animation: choose .8s ease-in-out infinite alternate; }
-.trade-strip[data-phase="triggered"] { border-left-color: var(--turn); }
-.trade-strip[data-phase="triggered"] .trade-strip__icon { color: var(--turn); }
-@keyframes choose { to { transform: scale(.82); opacity: .66; } }
-.trade-strip__icon { width: 26px; height: 26px; color: var(--magic); fill: none; stroke: currentColor; stroke-width: 1.7; }
-.trade-strip__copy { min-width: 0; }
-.trade-strip__copy strong { display: block; font-size: 14px; line-height: 1.25; }
-.trade-strip__copy span { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; margin-top: 2px; }
-.trade-strip__route { color: var(--magic-light); font-size: clamp(17px, 2vw, 22px); font-weight: 850; white-space: nowrap; }
-
 /* Match desk */
 .matchdesk {
-  height: min(790px, calc(100dvh - 96px));
+  height: min(790px, calc(100dvh - 112px));
   min-height: 610px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -445,31 +503,28 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .match-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .match-title h2 { font-size: 20px; }
 .difficulty-label { color: var(--muted); font-size: 12px; white-space: nowrap; }
-/* The two graveyards: what each side could bring home, and to where. */
-.graveyards {
+/* Reads the two marks the board draws, so the rule teaches itself. */
+.desk-legend {
   padding: 11px 17px 12px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--magic) 4%, var(--surface));
   display: grid;
-  gap: 9px;
+  gap: 7px;
 }
-.graveyard-row { display: grid; grid-template-columns: 92px 1fr; gap: 9px; align-items: start; }
-.graveyard-row > strong { font-size: 12px; color: var(--muted); font-weight: 780; padding-top: 3px; }
-.graveyard-row ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.graveyard-row li {
-  display: inline-flex;
+.desk-legend p {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 20px 1fr;
   align-items: center;
-  gap: 4px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--surface-2);
-  padding: 2px 7px 2px 3px;
-  font-size: 11px;
+  gap: 9px;
   color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
-.graveyard-row li.is-open { border-color: var(--magic); color: var(--text); }
-.graveyard-row li svg { width: 21px; height: 21px; }
-.graveyard-row .empty-note { color: var(--muted); font-size: 12px; padding-top: 3px; }
+.legend-key { width: 18px; height: 18px; border-radius: 50%; }
+.legend-key--offer { border: 3px solid var(--magic); }
+.legend-key--home { border: 2px dashed var(--magic-light); transform: scale(.7); }
+.legend-key--risk { background: var(--risk); transform: scale(.42); box-shadow: 0 0 0 5px rgba(16, 19, 21, .45); }
 .review-nav {
   display: flex;
   align-items: center;
@@ -657,8 +712,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .top-action svg { width: 20px; height: 20px; }
   .app-shell { width: 100%; padding: 8px 0 32px; display: block; }
   .arena { width: min(680px, 100%); margin: 0 auto; scroll-margin-top: 64px; }
-  .board { width: 100%; min-width: 0; max-width: none; border-radius: 0; box-shadow: none; touch-action: pan-y pinch-zoom; }
+  .board { height: auto; width: 100%; min-height: 0; max-width: none; border-radius: 0; box-shadow: none; touch-action: pan-y pinch-zoom; }
   .playerbar { padding: 0 10px; }
+  /* No fixed board height to protect down here, so the prompt can run as
+     long as it needs to. */
+  .board-action span { -webkit-line-clamp: none; display: block; }
   .board-action {
     margin: 0 10px 8px;
     position: sticky;
@@ -666,8 +724,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
     z-index: 14;
     scroll-margin-top: 64px;
   }
-  .trade-strip[data-phase="selecting"] { display: none; }
-  .trade-strip { margin: 8px 10px 0; }
   .matchdesk { width: auto; max-width: 680px; height: auto; min-height: 0; margin: 18px auto 0; border-radius: 9px; }
   .desk-body--moves { max-height: 360px; }
 
@@ -739,14 +795,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .brand { font-size: 16px; }
   .playerbar { min-height: 46px; }
   .avatar { width: 34px; height: 34px; flex-basis: 34px; }
-  .captured svg { width: 15px; height: 15px; }
+  .chip svg { width: 16px; height: 16px; }
+  .chip { font-size: 10px; padding: 1px 5px 1px 1px; }
   .think-state { max-width: 92px; text-align: right; }
   .think-state::after { display: none; }
-  .trade-strip { grid-template-columns: 25px 1fr auto; gap: 8px; padding: 9px 10px 9px 8px; }
-  .trade-strip__icon { width: 23px; height: 23px; }
-  .trade-strip__copy strong { font-size: 13px; }
-  .trade-strip__copy span { font-size: 11px; }
-  .trade-strip__route { font-size: 17px; }
   .desk-head { padding: 19px 18px 16px; }
   .desk-head h1, .desk-head h2 { font-size: 25px; }
   .desk-body { padding: 16px 18px; }
@@ -764,10 +816,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .brand { font-size: 14px; }
   .top-action { padding: 0 6px; }
   .avatar { display: none; }
-  .trade-strip__copy span { display: none; }
-  .trade-strip { min-height: 54px; }
   .color-choice button { min-height: 64px; font-size: 12px; }
-  .graveyard-row { grid-template-columns: 1fr; gap: 4px; }
+  .chip b { display: none; }
   .review-nav { padding: 8px 10px 9px; }
   .review-nav button { min-height: 44px; min-width: 44px; }
 }
@@ -779,6 +829,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
 @media (forced-colors: active) {
   .board:focus { outline: 3px solid Highlight; outline-offset: 2px; }
   .sq--home-choice { outline: 2px dashed Highlight; outline-offset: -4px; }
+  .sq--offer { outline: 3px solid Highlight; outline-offset: -3px; }
+  .sq--home-open::before { border-color: Highlight; }
+  .sq--at-risk::after { background: Highlight; }
+  .chip--ready { outline: 2px solid Highlight; }
 }
 
 /* MottyBot's trash talk. Sits below the board in normal flow, never over the
@@ -788,6 +842,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   align-items: center;
   gap: 10px;
   margin: 8px 0 0;
+  min-height: 56px;
   padding: 9px 13px;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -798,6 +853,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
   font-weight: 620;
   line-height: 1.35;
 }
+
+.bot-taunt[data-empty="true"] { visibility: hidden; }
+.bot-taunt__line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 
 .bot-taunt__who {
   flex: 0 0 26px;
@@ -841,4 +899,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 440px) {
   .bot-taunt { font-size: 12.5px; padding: 8px 10px; gap: 8px; }
   .bot-taunt__who { flex-basis: 23px; width: 23px; height: 23px; font-size: 12px; }
+}
+
+/* Below the desktop breakpoint nothing depends on the arena keeping a
+   constant height, so the bubble collapses instead of holding its slot. */
+@media (max-width: 1080px) {
+  .bot-taunt { min-height: 0; }
+  .bot-taunt[data-empty="true"] { display: none; }
 }

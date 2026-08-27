@@ -18,6 +18,12 @@ export class BoardView {
     this.selected = null;
     this.drag = null;
     this.squareSelector = null;
+    // Squares the mechanic is live on right now: enemy pieces whose capture
+    // would bring one of your own home, and the homes that would receive
+    // them. Without these the whole rule is invisible.
+    this.offerSquares = new Set();
+    this.homeSquares = new Set();
+    this.riskSquares = new Set();
     this.busy = false;             // true while an animation runs
     this.renderVersion = 0;        // invalidates animation work after a new position
     this.promotionCancel = null;
@@ -255,10 +261,21 @@ export class BoardView {
     this.#clearOverlays('last:');
     if (from) { this.#overlay(`last:${from}`, from, 'overlay--hl'); this.#overlay(`last:${to}`, to, 'overlay--hl'); }
   }
+  // Point at the live opportunities. Passing empty arrays clears them.
+  setOpportunities({ targets = [], homes = [], risks = [] } = {}) {
+    this.offerSquares = new Set(targets);
+    this.homeSquares = new Set(homes);
+    this.riskSquares = new Set(risks);
+    this.#applySquareStates();
+  }
+
   #applySquareStates() {
     for (const cell of this.el.querySelectorAll('.sq')) {
       const square = cell.dataset.sq;
       cell.classList.toggle('sq--home-choice', !!this.squareSelector?.eligible.has(square));
+      cell.classList.toggle('sq--offer', this.offerSquares.has(square));
+      cell.classList.toggle('sq--home-open', this.homeSquares.has(square));
+      cell.classList.toggle('sq--at-risk', this.riskSquares.has(square));
     }
     this.#updateSquareLabels();
   }
@@ -391,7 +408,10 @@ export class BoardView {
       const suffix = piece ? `${piece.dataset.color === 'w' ? 'white' : 'black'} ${names[piece.dataset.type]}` : 'empty';
       const selected = this.selected === sq.dataset.sq ? ', selected' : '';
       const choice = this.squareSelector?.eligible.has(sq.dataset.sq) ? `, ${this.squareSelector.choiceLabel}` : '';
-      sq.setAttribute('aria-label', `${sq.dataset.sq}, ${suffix}${choice}${selected}`);
+      const offer = this.offerSquares.has(sq.dataset.sq) ? ', capture this to bring your own piece home' : '';
+      const home = this.homeSquares.has(sq.dataset.sq) ? ', an open home square' : '';
+      const risk = this.riskSquares.has(sq.dataset.sq) ? ', taking this one brings a piece of theirs home' : '';
+      sq.setAttribute('aria-label', `${sq.dataset.sq}, ${suffix}${offer}${home}${risk}${choice}${selected}`);
     }
   }
   #activateSquare(sq) {

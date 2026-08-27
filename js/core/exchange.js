@@ -348,16 +348,74 @@ export class ExchangeMatch {
     };
   }
 
-  // The resurrectable dead for one side, for the UI: which types wait, and
-  // which of their homes are open right now.
+  // The resurrectable dead for one side, for the UI: which types wait, which
+  // of their homes are open right now, and whether the opponent still has a
+  // piece of that type to capture. A piece is only genuinely ready to come
+  // home when both are true.
   graveyard(color) {
+    const enemyTypes = new Set();
+    for (const [, piece] of this.#boardEntries()) {
+      if (piece.color !== color) enemyTypes.add(piece.type);
+    }
     return this.dead[color]
       .filter((entry) => entry.homes)
-      .map((entry) => ({
-        type: entry.type,
-        homes: entry.homes.slice(),
-        open: entry.homes.filter((home) => !this.chess.get(home)),
-      }));
+      .map((entry) => {
+        const open = entry.homes.filter((home) => !this.chess.get(home));
+        return {
+          type: entry.type,
+          homes: entry.homes.slice(),
+          open,
+          matchOnBoard: enemyTypes.has(entry.type),
+          ready: open.length > 0 && enemyTypes.has(entry.type),
+        };
+      });
+  }
+
+  // Every square the side to move could capture right now to bring one of
+  // its own dead pieces home, and the home squares that would receive them.
+  // This is what the board points at, so the mechanic stops being invisible.
+  offerTargets() {
+    const targets = [];
+    const homes = new Set();
+    if (this.status().over) return { targets, homes: [] };
+    const seen = new Set();
+    for (const move of this.legalMoves()) {
+      if (!move.captured || move.captured === 'p') continue;
+      if (seen.has(move.to)) continue;
+      seen.add(move.to);
+      const options = this.resurrectionOptions(move);
+      if (!options) continue;
+      targets.push({ square: move.to, type: options.victimType, homes: options.homes });
+      for (const home of options.homes) homes.add(home);
+    }
+    return { targets, homes: [...homes] };
+  }
+
+  // Both graveyards in the form the search wants: what each side is still
+  // owed, and to which squares. Pawns never carry homes, so they never appear.
+  vouchers() {
+    const side = (color) => this.dead[color]
+      .filter((entry) => entry.homes && entry.homes.length)
+      .map((entry) => ({ type: entry.type, homes: entry.homes.slice() }));
+    return { w: side('w'), b: side('b') };
+  }
+
+  // The mirror of offerTargets: your own pieces that would redeem one of the
+  // other side's claims. Lose one of these and they get a piece back for
+  // nothing, so the board says so while you can still do something about it.
+  exposedTo(color) {
+    const enemy = color === 'w' ? 'b' : 'w';
+    const wanted = new Set();
+    for (const entry of this.dead[enemy]) {
+      if (!entry.homes || !entry.homes.length) continue;
+      if (entry.homes.some((home) => !this.chess.get(home))) wanted.add(entry.type);
+    }
+    if (!wanted.size) return [];
+    const squares = [];
+    for (const [square, piece] of this.#boardEntries()) {
+      if (piece.color === color && wanted.has(piece.type)) squares.push(square);
+    }
+    return squares;
   }
 
   resurrectionsUsed(color) {

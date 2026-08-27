@@ -2,15 +2,16 @@
 // quiescence, killer/history move ordering and check extensions, running on the
 // 0x88 board in fastboard.js.
 //
-// The search plays pure chess. Weekly house rules (this week: Prisoner
-// Exchange) are judged outside the search, by comparing the positions each
-// choice produces.
+// The search knows one house rule directly: a dead piece with a clear
+// starting square and a matching enemy piece still on the board is a standing
+// claim on that much material. Everything else about Prisoner Exchange is
+// judged outside the search, by comparing the positions each choice produces.
 
 import { Chess } from '../vendor/chess.js';
 import {
   FastBoard, moveFrom, moveTo, movePromo, moveKind, moveToUci,
   KIND_EP, EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
-  WHITE, colorOf, typeOf, fileOf, rankOf,
+  WHITE, colorOf, typeOf, fileOf, rankOf, nameToSquare,
 } from './fastboard.js';
 import { makeRng, seedFromString } from './rng.js';
 
@@ -113,6 +114,59 @@ export const LEVELS = {
   },
 };
 
+/* ---------------- the weekly rule, seen from inside the search ----------- */
+// A dead knight, bishop, rook or queen can be redeemed by capturing an enemy
+// piece of the same kind, which puts it back on its own starting square. So a
+// graveyard entry is worth real material when three things hold at once: an
+// enemy piece of that kind is still on the board, one of its home squares is
+// empty, and it has not already been spent. The two weights below are the
+// engine's opinion of how likely each is to be cashed.
+const CLAIM_LIVE = 0.35;    // a home square stands clear right now
+const CLAIM_BLOCKED = 0.08; // the claim is real but the home is occupied
+const TYPE_CODE = { n: KNIGHT, b: BISHOP, r: ROOK, q: QUEEN };
+
+// Turn the match's graveyards into something the 0x88 board can read fast.
+// Duplicate claims on one kind decay, because a single turn redeems one.
+export function compileClaims(vouchers) {
+  if (!vouchers) return null;
+  const side = (list) => {
+    const seen = new Map();
+    const out = [];
+    for (const entry of list || []) {
+      const type = TYPE_CODE[entry.type];
+      if (!type || !entry.homes?.length) continue;
+      const rank = seen.get(type) || 0;
+      seen.set(type, rank + 1);
+      out.push({
+        type,
+        homes: entry.homes.map(nameToSquare),
+        weight: 1 / (rank + 1),
+      });
+    }
+    return out;
+  };
+  const w = side(vouchers.w);
+  const b = side(vouchers.b);
+  return w.length || b.length ? { w, b } : null;
+}
+
+function claimValue(squares, claims, enemyCounts) {
+  let total = 0;
+  for (const claim of claims) {
+    const targets = enemyCounts[claim.type];
+    if (!targets) continue;          // nothing left to redeem it against
+    let open = false;
+    for (const home of claim.homes) {
+      if (squares[home] === EMPTY) { open = true; break; }
+    }
+    // One lone enemy piece of that kind is a harder capture to arrange than
+    // a choice of two, so a single target is discounted.
+    const reach = targets > 1 ? 1 : 0.7;
+    total += VAL[claim.type] * claim.weight * reach * (open ? CLAIM_LIVE : CLAIM_BLOCKED);
+  }
+  return total;
+}
+
 /* ---------------- evaluation ---------------- */
 function evaluate(board) {
   const sq = board.squares;
@@ -122,6 +176,8 @@ function evaluate(board) {
   let bishopsW = 0, bishopsB = 0;
   const pawnFilesW = [0, 0, 0, 0, 0, 0, 0, 0];
   const pawnFilesB = [0, 0, 0, 0, 0, 0, 0, 0];
+  const countW = [0, 0, 0, 0, 0, 0, 0];
+  const countB = [0, 0, 0, 0, 0, 0, 0];
   let kingW = -1, kingB = -1;
 
   for (let s = 0; s < 128; s++) {
@@ -130,6 +186,7 @@ function evaluate(board) {
     if (piece === EMPTY) continue;
     const color = colorOf(piece);
     const type = typeOf(piece);
+    if (color === WHITE) countW[type]++; else countB[type]++;
     if (type === KING) { if (color === WHITE) kingW = s; else kingB = s; continue; }
     const base = VAL[type];
     if (color === WHITE) forceW += base; else forceB += base;
@@ -174,7 +231,20 @@ function evaluate(board) {
     }
   }
 
+  // This week's rule: what each side is still owed, and can still collect.
+  if (board.claims) {
+    score += claimValue(sq, board.claims.w, countB);
+    score -= claimValue(sq, board.claims.b, countW);
+  }
+
   return board.turn === WHITE ? score : -score;
+}
+
+// A testing seam: the static verdict on one position, with no search at all.
+export function evaluateFen(fen, vouchers) {
+  const board = new FastBoard(fen);
+  board.claims = compileClaims(vouchers);
+  return evaluate(board);
 }
 
 /* ---------------- search ---------------- */
@@ -310,6 +380,7 @@ export function think(fen, level, seed, opts = {}) {
   const cfg = { ...(LEVELS[level] || LEVELS.medium), ...opts };
   const rng = makeRng(seedFromString(String(seed ?? 'mottybot')));
   const board = new FastBoard(fen);
+  board.claims = compileClaims(cfg.vouchers);
   const rootMoves = board.legalMoves();
   if (!rootMoves.length) return null;
 
