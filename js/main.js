@@ -40,6 +40,10 @@ const state = {
   resultRecorded: false,
   result: null,
   replay: null,
+  // Non-null while the player is looking back through earlier positions
+  // during a live game. The game keeps running underneath; only the view
+  // is rewound.
+  browse: null,
 };
 
 const board = new BoardView($('board'), { onUserMove: handleUserMove });
@@ -151,12 +155,18 @@ function kingSquare(color, fen = state.match?.fen()) {
   return null;
 }
 
+// While reviewing an earlier position the board deliberately does not show
+// the live one, so every live repaint has to stand down until the player
+// returns to the present.
+function reviewing() { return state.browse !== null; }
+
 function syncBoard() {
-  if (!state.match) return;
+  if (!state.match || reviewing()) return;
   board.verify(positionMap());
 }
 
 function updateCheckMark(fen = state.match?.fen()) {
+  if (reviewing() && fen === state.match?.fen()) return;
   if (!fen) return board.setCheck(null);
   const chess = new Chess(fen, { skipValidation: true });
   board.setCheck(chess.isCheck() ? kingSquare(chess.turn(), fen) : null);
@@ -456,6 +466,13 @@ function panelPlaying() {
       <p>Capture a piece that matches one of your dead, and you may bring yours home instead of taking theirs.</p>
     </div>
     <div class="graveyards" id="graveyards"></div>
+    <div class="review-nav" role="group" aria-label="Step back through the game">
+      <button id="review-first" type="button" aria-label="First position">|&lsaquo;</button>
+      <button id="review-prev" type="button" aria-label="Previous position">&lsaquo;</button>
+      <button id="review-next" type="button" aria-label="Next position">&rsaquo;</button>
+      <button id="review-live" type="button" aria-label="Back to the live position">Live</button>
+      <span id="review-label"></span>
+    </div>
     <div class="desk-body desk-body--moves"><div class="move-list" id="move-list"></div></div>
     <div class="desk-footer">
       <button class="btn btn--danger" id="resign-game">Resign</button>
@@ -463,8 +480,13 @@ function panelPlaying() {
     </div>`;
   $('resign-game').onclick = confirmResign;
   $('game-rules').onclick = showRules;
+  $('review-first').onclick = () => stepReview(0, { absolute: true });
+  $('review-prev').onclick = () => stepReview(-1);
+  $('review-next').onclick = () => stepReview(1);
+  $('review-live').onclick = () => exitReview();
   renderGraveyards();
   renderMoveList();
+  updateReviewNav();
 }
 
 function panelPostGame() {
@@ -507,26 +529,119 @@ function renderMoveList() {
   const wrap = $('move-list');
   if (!wrap || !state.match) return;
   const blocks = [];
+  let index = -1;
   for (const entry of state.match.log) {
+    index++;
     const number = Math.floor(entry.ply / 2) + 1;
     const marker = `${number}${entry.color === 'w' ? '.' : '…'}`;
     const side = entry.color === state.myColor ? 'You' : 'MottyBot';
+    // Frame 0 is the starting position, so the entry at log index i is
+    // frame i + 1. Clicking a row jumps the review to that position.
+    const frame = index + 1;
     if (entry.kind === 'move') {
       blocks.push(`
-        <div class="turn-record">
+        <button class="turn-record" type="button" data-frame="${frame}">
           <div class="move-line"><span class="move-number">${marker}</span><span class="move-san">${escapeHTML(entry.san)}</span><span class="move-side">${side}</span></div>
-        </div>`);
+        </button>`);
     } else if (entry.kind === 'resurrect') {
       blocks.push(`
-        <div class="turn-record turn-record--return">
+        <button class="turn-record turn-record--return" type="button" data-frame="${frame}">
           <div class="move-line"><span class="move-number">${marker}</span><span class="move-san">${capitalize(PIECE_NAMES[entry.piece])} home to ${entry.home}</span><span class="move-side">${side}</span></div>
           <div class="trade-line">Spared the ${PIECE_NAMES[entry.declined.victimType]} on ${entry.declined.victimSquare}.</div>
-        </div>`);
+        </button>`);
     }
   }
   wrap.innerHTML = blocks.length ? blocks.join('') : '<div class="empty-log">Your moves and every homecoming will appear here.</div>';
-  const scroller = wrap.closest('.desk-body--moves');
-  if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  wrap.onclick = (event) => {
+    const row = event.target.closest('[data-frame]');
+    if (row) stepReview(Number(row.dataset.frame), { absolute: true });
+  };
+  markReviewedRow();
+  if (!reviewing()) {
+    const scroller = wrap.closest('.desk-body--moves');
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  }
+}
+
+/* Stepping back through the game while it is still running */
+
+// Frames are rebuilt from the log every step. The log only ever appends, so
+// a frame index keeps pointing at the same position even when MottyBot
+// moves while the player is looking backwards.
+function stepReview(delta, { absolute = false } = {}) {
+  if (!state.match || state.screen === 'exchange' || state.screen === 'replay') return;
+  if (state.over) return;
+  const frames = buildReplayFrames();
+  const last = frames.length - 1;
+  const current = state.browse ? state.browse.index : last;
+  const next = Math.max(0, Math.min(last, absolute ? delta : current + delta));
+  if (next >= last) {
+    exitReview();
+    return;
+  }
+  state.browse = { index: next, frames };
+  board.setInteractive(null);
+  setYourTurn(false);
+  const frame = frames[next];
+  board.setPosition(positionMap(frame.fen));
+  board.setLastMove(frame.from || null, frame.to || null);
+  updateCheckMark(frame.fen);
+  setPlayerAction('Reviewing', {
+    phase: 'selecting',
+    title: 'Looking back at an earlier position',
+    copy: `${frame.label}. ${frame.detail}. The game is still waiting for you.`,
+    buttons: [{ label: 'Back to the live position', kind: 'btn--primary', onClick: () => exitReview() }],
+  });
+  updateReviewNav();
+  markReviewedRow();
+  announce(`Reviewing ${frame.label}. ${frame.detail}. Position ${next + 1} of ${frames.length}.`);
+}
+
+function exitReview() {
+  if (!state.browse) { updateReviewNav(); return; }
+  state.browse = null;
+  setPlayerAction(null);
+  if (!state.match) return;
+  board.setPosition(positionMap());
+  const lastMove = [...state.match.log].reverse().find((e) => e.kind === 'move' || e.kind === 'resurrect');
+  if (lastMove?.kind === 'move') board.setLastMove(lastMove.from, lastMove.to);
+  else if (lastMove?.kind === 'resurrect') board.setLastMove(lastMove.declined.victimSquare, lastMove.home);
+  else board.setLastMove(null);
+  updateCheckMark();
+  renderCaptured();
+  renderGraveyards();
+  showTradeStatus();
+  updateReviewNav();
+  markReviewedRow();
+  if (!state.over && state.screen === 'playing' && state.match.turn() === state.myColor) {
+    setYourTurn(true);
+    board.setInteractive(state.myColor, (square) => state.match.legalMoves(square));
+  }
+  announce('Back to the live position.');
+}
+
+function markReviewedRow() {
+  const wrap = $('move-list');
+  if (!wrap) return;
+  const active = state.browse ? String(state.browse.index) : null;
+  for (const row of wrap.querySelectorAll('[data-frame]')) {
+    row.classList.toggle('is-reviewed', row.dataset.frame === active);
+  }
+}
+
+function updateReviewNav() {
+  const label = $('review-label');
+  if (!label || !state.match) return;
+  const total = state.match.log.length + 1;
+  const index = state.browse ? state.browse.index : total - 1;
+  const locked = state.screen === 'exchange' || state.over;
+  $('review-first').disabled = locked || index === 0;
+  $('review-prev').disabled = locked || index === 0;
+  $('review-next').disabled = locked || index >= total - 1;
+  $('review-live').disabled = locked || !state.browse;
+  label.textContent = state.browse
+    ? `Position ${index + 1} of ${total}`
+    : total > 1 ? 'Live' : 'No moves yet';
 }
 
 function capitalize(value) { return value.charAt(0).toUpperCase() + value.slice(1); }
@@ -557,6 +672,7 @@ function startBotGame(level, myColor, { seed = randomSeed() } = {}) {
   state.resultRecorded = false;
   state.result = null;
   state.replay = null;
+  state.browse = null;
   configureBoardForMatch();
   sound.unlock();
   sound.start();
@@ -582,6 +698,7 @@ function resumeGame(data) {
     state.resultRecorded = false;
     state.result = null;
     state.replay = null;
+    state.browse = null;
     configureBoardForMatch();
     resetTaunts();
     clearTaunt();
@@ -610,6 +727,15 @@ async function playMoveAnimation(move, { instant = false } = {}) {
       : {};
   const epSquare = move.flags.includes('e') ? move.to[0] + (move.color === 'w' ? '5' : '4') : null;
   move.captured ? sound.capture() : sound.move();
+  if (reviewing()) {
+    // The move still happens; the reviewer just is not looking at it.
+    state.animating = false;
+    renderCaptured();
+    renderMoveList();
+    renderGraveyards();
+    updateReviewNav();
+    return state.match === match && state.serial === serial && !state.over;
+  }
   if (instant) {
     await board.animateMove({ from: move.to, to: move.to, ...rookHop, epSquare, promotion: move.promotion, color: move.color });
   } else {
@@ -625,7 +751,40 @@ async function playMoveAnimation(move, { instant = false } = {}) {
   renderGraveyards();
   showTradeStatus();
   updateCheckMark();
+  updateReviewNav();
   return true;
+}
+
+// Rewind the capture the board just showed, then bring the piece home. The
+// undone move is handed back by takeHomecoming so the reverse can be drawn
+// exactly.
+async function playHomecoming(event, byBot) {
+  const match = state.match;
+  const serial = state.serial;
+  const undone = event.undone;
+  state.animating = true;
+
+  if (!reviewing() && undone) {
+    setTradeStatus({
+      phase: 'selecting',
+      title: byBot ? 'MottyBot takes it back' : 'Taking it back',
+      copy: `The ${PIECE_NAMES[undone.captured]} on ${event.declined.victimSquare} is spared.`,
+      route: event.declined.victimSquare,
+    });
+    sound.move();
+    await board.animateUndoCapture({
+      from: undone.from,
+      to: undone.to,
+      victimSquare: event.declined.victimSquare,
+      victim: { type: event.declined.victimType, color: byBot ? state.myColor : opposingColor(state.myColor) },
+      wasPromotion: Boolean(undone.promotion),
+      color: undone.color,
+    });
+    if (state.match !== match || state.serial !== serial) return false;
+    if (state.over) return false;
+  }
+  state.animating = false;
+  return playResurrection(event, byBot);
 }
 
 // The homecoming: the declined capture flashes, the dead piece pops back in
@@ -650,6 +809,14 @@ async function playResurrection(event, byBot) {
   announce(byBot
     ? `MottyBot declined the capture on ${event.declined.victimSquare}. Its ${pieceName} returned to ${event.home}.`
     : `You declined the capture. Your ${pieceName} returned to ${event.home}.`);
+  if (reviewing()) {
+    state.animating = false;
+    renderCaptured();
+    renderMoveList();
+    renderGraveyards();
+    updateReviewNav();
+    return state.match === match && state.serial === serial && !state.over;
+  }
   await board.animateResurrection({ square: event.home, color: event.color, type: event.piece });
   if (state.match !== match || state.serial !== serial) return false;
   state.animating = false;
@@ -660,6 +827,7 @@ async function playResurrection(event, byBot) {
   renderMoveList();
   renderGraveyards();
   updateCheckMark();
+  updateReviewNav();
   showTaunt(pickTaunt(byBot ? 'botReturn' : 'playerReturn', { always: true }));
   return true;
 }
@@ -696,6 +864,8 @@ async function botLoop(serial) {
 
     if (match.turn() === state.myColor) {
       setThinking(false);
+      updateReviewNav();
+      if (reviewing()) return; // the board stays rewound until they come back
       setYourTurn(true);
       board.setInteractive(state.myColor, (square) => match.legalMoves(square));
       showTradeStatus();
@@ -703,7 +873,7 @@ async function botLoop(serial) {
       return;
     }
 
-    setYourTurn(false);
+    if (!reviewing()) setYourTurn(false);
     board.setInteractive(null);
     setThinking(true);
     const started = performance.now();
@@ -737,21 +907,47 @@ async function botLoop(serial) {
     if (!action || state.over || state.screen !== 'playing' || state.match !== match || state.serial !== serial) return;
 
     if (action.kind === 'resurrect') {
-      let event = null;
+      // Show the take, then show it being taken back: MottyBot plays the
+      // capture for real and rolls it back, exactly as the player does.
+      let captureMove = null;
       try {
-        event = match.resurrect({ ...action.capture, home: action.home });
+        captureMove = match.applyMove(action.capture);
       } catch {
-        const legal = match.legalMoves();
-        if (!legal.length) return;
-        action = { kind: 'move', move: { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } };
+        captureMove = null;
       }
-      if (event) {
+      if (captureMove && match.pendingResurrection()) {
+        announce(`MottyBot took the ${PIECE_NAMES[captureMove.captured]} on ${captureMove.to}.`);
+        if (!await playMoveAnimation(captureMove)) return;
+        let event = null;
+        try {
+          event = match.takeHomecoming(action.home);
+        } catch {
+          event = null;
+        }
+        if (event) {
+          persistGame();
+          if (!await playHomecoming(event, true)) return;
+          continue;
+        }
+        // The homecoming fell through: the capture it just played stands.
+        match.keepCapture();
         persistGame();
-        if (!await playResurrection(event, true)) return;
+        reactToMove(captureMove, true);
         continue;
       }
+      if (captureMove) {
+        match.keepCapture();
+        persistGame();
+        if (!await playMoveAnimation(captureMove)) return;
+        reactToMove(captureMove, true);
+        continue;
+      }
+      const legal = match.legalMoves();
+      if (!legal.length) return;
+      action = { kind: 'move', move: { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } };
     }
     const move = match.applyMove(action.move);
+    match.keepCapture();
     persistGame();
     announce(`MottyBot moved from ${move.from} to ${move.to}.`);
     if (!await playMoveAnimation(move)) return;
@@ -759,8 +955,11 @@ async function botLoop(serial) {
   }
 }
 
-async function performUserMove({ from, to, promotion, instant }) {
+async function handleUserMove({ from, to, promotion, instant }) {
   const match = state.match;
+  if (!match || state.over || state.animating || state.screen !== 'playing' || reviewing()) return;
+  if (match.turn() !== state.myColor) return;
+  const serial = state.serial;
   let move;
   try {
     move = match.applyMove({ from, to, promotion });
@@ -771,79 +970,63 @@ async function performUserMove({ from, to, promotion, instant }) {
   }
   setYourTurn(false);
   board.setInteractive(null);
-  persistGame();
+  // The capture is played and shown first. Only then does the choice come
+  // up, so the decision is "keep this or take it back", not a guess.
   if (!await playMoveAnimation(move, { instant })) return;
+  if (state.match !== match || state.serial !== serial || state.over) return;
+
+  const offer = match.pendingResurrection();
+  if (offer) {
+    beginExchangeChoice(offer, move);
+    return;
+  }
+  match.keepCapture();
+  persistGame();
   reactToMove(move, false);
   botLoop(state.serial);
 }
 
-function handleUserMove({ from, to, promotion, instant }) {
-  const match = state.match;
-  if (!match || state.over || state.animating || state.screen !== 'playing') return;
-  if (match.turn() !== state.myColor) return;
-  let options = null;
-  try {
-    options = match.resurrectionOptions({ from, to, promotion });
-  } catch {
-    options = null;
-  }
-  if (options) {
-    beginExchangeChoice({ from, to, promotion, instant }, options);
-    return;
-  }
-  performUserMove({ from, to, promotion, instant });
-}
-
-// The player just gestured a capture that could instead bring a piece home.
-// Freeze the board and put the choice on the action bar.
-function beginExchangeChoice(pending, options) {
+// The capture has already been played and drawn. Offer to take it back.
+// Nothing is persisted until the choice resolves: a reload mid-decision
+// rewinds to before the capture rather than silently committing it.
+function beginExchangeChoice(options, move) {
   const match = state.match;
   const serial = state.serial;
   state.screen = 'exchange';
   board.setInteractive(null);
-  // A drag gesture already snapped the piece's sprite onto the target square,
-  // but the capture has NOT been played. verify() cannot catch that (the
-  // piece map is still correct, only the sprite drifted), so rebuild
-  // unconditionally: the capturer visibly returns to its square while the
-  // choice is open.
-  board.setPosition(positionMap());
+  updateReviewNav();
   clearTaunt();
   const victimName = PIECE_NAMES[options.victimType];
   const homes = options.homes;
 
-  const backToPlay = () => {
-    if (state.serial !== serial || state.match !== match || state.over) return;
-    state.screen = 'playing';
-    syncBoard();
-    setYourTurn(true);
-    board.setInteractive(state.myColor, (square) => match.legalMoves(square));
-    showTradeStatus();
-    announce('Choice canceled. Your move.');
-    focusBoard();
-  };
-
-  const takeIt = () => {
+  const keepIt = () => {
     if (state.serial !== serial || state.match !== match || state.over || state.screen !== 'exchange') return;
     state.screen = 'playing';
     setPlayerAction(null);
-    performUserMove(pending);
+    match.keepCapture();
+    persistGame();
+    showTradeStatus();
+    updateReviewNav();
+    reactToMove(move, false);
+    botLoop(serial);
   };
 
   const doResurrect = async (home) => {
     if (state.serial !== serial || state.match !== match || state.over) return;
     let event;
     try {
-      event = match.resurrect({ from: pending.from, to: pending.to, promotion: pending.promotion, home });
+      event = match.takeHomecoming(home);
     } catch {
       sound.illegal();
-      backToPlay();
+      keepIt();
       return;
     }
     state.screen = 'playing';
     setPlayerAction(null);
     board.setInteractive(null);
     persistGame();
-    if (!await playResurrection(event, false)) return;
+    updateReviewNav();
+    if (!await playHomecoming(event, false)) return;
     botLoop(serial);
   };
 
@@ -857,12 +1040,12 @@ function beginExchangeChoice(pending, options) {
       phase: 'selecting',
       title: `Where should your ${victimName} return?`,
       copy: 'Tap one of the highlighted starting squares.',
-      onCancel: backToPlay,
+      onCancel: keepIt,
     });
     board.setSquareSelection(homes, (square) => { void doResurrect(square); }, {
-      instruction: `Choose which starting square your ${victimName} returns to. Press Escape to cancel.`,
+      instruction: `Choose which starting square your ${victimName} returns to. Press Escape to keep the capture instead.`,
       choiceLabel: `open starting square for your ${victimName}`,
-      onCancel: backToPlay,
+      onCancel: keepIt,
     });
     announce(`Choose which starting square your ${victimName} returns to: ${homes.join(' or ')}.`);
     focusBoard({ keepActionVisible: true });
@@ -870,23 +1053,22 @@ function beginExchangeChoice(pending, options) {
 
   setPlayerAction('Your choice', {
     phase: 'selecting',
-    title: `Take the ${victimName}, or bring yours home?`,
+    title: `Keep the ${victimName}, or undo and bring yours home?`,
     copy: homes.length === 1
-      ? `Take MottyBot's ${victimName} on ${options.victimSquare}, or spare it and your ${victimName} returns to ${homes[0]}.`
-      : `Take MottyBot's ${victimName} on ${options.victimSquare}, or spare it and yours returns to ${homes.join(' or ')}.`,
-    onCancel: backToPlay,
+      ? `Keep the ${victimName} you just took, or undo the capture: it goes back to ${options.victimSquare} and your ${victimName} returns to ${homes[0]}.`
+      : `Keep the ${victimName} you just took, or undo the capture: it goes back to ${options.victimSquare} and yours returns to ${homes.join(' or ')}.`,
     buttons: [
-      { label: 'Take it', kind: 'btn--primary', onClick: takeIt },
-      { label: 'Bring mine home', kind: 'btn--magic', onClick: bringHome },
+      { label: 'Keep it', kind: 'btn--primary', onClick: keepIt },
+      { label: 'Undo, bring mine home', kind: 'btn--magic', onClick: bringHome },
     ],
   });
   setTradeStatus({
     phase: 'selecting',
     title: 'A homecoming is on the table',
-    copy: `Spare their ${victimName} and your dead ${victimName} returns to ${homes.join(' or ')}.`,
+    copy: `Undo the capture and your dead ${victimName} returns to ${homes.join(' or ')}.`,
     route: homes.join(' '),
   });
-  announce(`You may take the ${victimName} on ${options.victimSquare}, or bring your own ${victimName} home to ${homes.join(' or ')}. Choose on the action bar.`);
+  announce(`You took the ${victimName} on ${options.victimSquare}. Keep it, or undo the capture and bring your own ${victimName} home to ${homes.join(' or ')}. Choose on the action bar.`);
   focusBoard({ keepActionVisible: true });
 }
 
@@ -910,9 +1092,16 @@ function endGame() {
   if (!state.match || state.over) return;
   const status = state.match.status();
   if (!status.over) return;
+  const wasReviewing = state.browse !== null;
+  state.browse = null;
   state.over = true;
   state.animating = false;
   state.screen = 'postgame';
+  if (wasReviewing) {
+    board.setPosition(positionMap());
+    board.setLastMove(null);
+    updateCheckMark();
+  }
   board.setInteractive(null);
   setThinking(false);
   setYourTurn(false);
@@ -1198,6 +1387,20 @@ $('skip-link').addEventListener('click', (event) => {
   target.focus({ preventScroll: true });
   target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 });
+// Left/Right step through the game the way they do on a chess site, but
+// only when the board does not have focus: there the arrows move between
+// squares.
+document.addEventListener('keydown', (event) => {
+  if (!$('modal-scrim').hidden) return;
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  const active = document.activeElement;
+  if (active === board.el || active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA') return;
+  if (state.screen !== 'playing' && state.screen !== 'exchange') return;
+  if (!state.match || state.over || state.screen === 'exchange') return;
+  event.preventDefault();
+  stepReview(event.key === 'ArrowLeft' ? -1 : 1);
+});
+
 $('nav-new').onclick = requestNewGame;
 $('nav-rules').onclick = showRules;
 $('nav-sound').onclick = () => {

@@ -68,6 +68,9 @@ export class ExchangeMatch {
     // own repetition count cannot be trusted after one.
     this.positionCounts = new Map();
     this.repetitionDraw = false;
+    // Set while a played capture is still waiting on a keep-or-come-home
+    // decision, and carries what a rollback would need.
+    this.pendingOffer = null;
     this.#countPosition();
   }
 
@@ -130,8 +133,49 @@ export class ExchangeMatch {
     return move.to;
   }
 
+  // Everything a rollback needs. Only taken when the move about to be played
+  // could offer a homecoming, which is rare, so the copying costs nothing in
+  // the ordinary case.
+  #snapshot() {
+    return {
+      fen: this.chess.fen(),
+      origins: new Map(this.origins),
+      dead: { w: this.dead.w.slice(), b: this.dead.b.slice() },
+      positionCounts: new Map(this.positionCounts),
+      repetitionDraw: this.repetitionDraw,
+      logLength: this.log.length,
+      ply: this.ply,
+    };
+  }
+
+  #restore(snapshot) {
+    this.chess.load(snapshot.fen);
+    this.origins = snapshot.origins;
+    this.dead = snapshot.dead;
+    this.positionCounts = snapshot.positionCounts;
+    this.repetitionDraw = snapshot.repetitionDraw;
+    this.log.length = snapshot.logLength;
+    this.ply = snapshot.ply;
+  }
+
+  // A cheap gate so an ordinary move never pays for the full eligibility
+  // search: there must be an enemy non-pawn standing on the target square
+  // and a matching dead piece with somewhere to come home to.
+  #couldOffer(to) {
+    const color = this.chess.turn();
+    const victim = this.chess.get(to);
+    if (!victim || victim.type === 'p' || victim.color === color) return false;
+    return this.#eligibleEntries(color, victim.type).length > 0;
+  }
+
   applyMove({ from, to, promotion }) {
     if (this.status().over) throw new Error('game is over');
+    // The capture is played for real first, so the board can show it being
+    // taken before anyone decides whether to take it back. If it turns out
+    // to offer a homecoming, keep everything needed to roll it back.
+    const offer = this.#couldOffer(to) ? this.resurrectionOptions({ from, to, promotion }) : null;
+    const snapshot = offer ? this.#snapshot() : null;
+    this.pendingOffer = null;
     const move = this.chess.move({ from, to, promotion: promotion || undefined });
 
     if (move.captured) {
@@ -181,7 +225,33 @@ export class ExchangeMatch {
     });
     this.ply++;
     this.#countPosition();
+    if (offer) {
+      this.pendingOffer = { offer, snapshot, move: { from, to, promotion: promotion || undefined } };
+    }
     return move;
+  }
+
+  // The homecoming still on the table for the move just played, or null.
+  pendingResurrection() {
+    return this.pendingOffer ? this.pendingOffer.offer : null;
+  }
+
+  // Let the capture stand. Nothing to undo; the offer simply lapses.
+  keepCapture() {
+    this.pendingOffer = null;
+  }
+
+  // Take the capture back and bring a piece home instead. The board has
+  // already shown the piece being taken, so the caller animates the reverse.
+  takeHomecoming(home) {
+    const pending = this.pendingOffer;
+    if (!pending) throw new Error('no homecoming is pending');
+    this.pendingOffer = null;
+    const undone = this.log[pending.snapshot.logLength];
+    this.#restore(pending.snapshot);
+    const event = this.resurrect({ ...pending.move, home });
+    event.undone = undone;
+    return event;
   }
 
   // Entries of this type whose home is open right now, most constrained
@@ -224,6 +294,7 @@ export class ExchangeMatch {
   // The whole turn: the capture is declined, their piece survives untouched,
   // and the mover's dead piece returns to its starting square instead.
   resurrect({ from, to, promotion, home }) {
+    this.pendingOffer = null;
     const options = this.resurrectionOptions({ from, to, promotion });
     if (!options) throw new Error('that move offers no resurrection');
     if (!options.homes.includes(home)) throw new Error(`no dead ${options.victimType} can return to ${home}`);
@@ -262,6 +333,7 @@ export class ExchangeMatch {
   }
 
   resign(color) {
+    this.pendingOffer = null;
     this.resignedBy = color;
     this.log.push({ kind: 'resign', color, ply: this.ply });
   }

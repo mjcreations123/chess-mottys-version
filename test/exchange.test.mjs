@@ -414,6 +414,74 @@ function play(...moves) {
   ok('a dead original piece remembers its own starting square, not its twin\'s');
 }
 
+// The capture is played for real before anyone chooses, so the board can
+// show it being taken and then taken back. Rolling it back must restore the
+// match EXACTLY, or the undo silently corrupts the game.
+{
+  const build = () => {
+    const m = new ExchangeMatch('rollback');
+    m.chess.load('3q3k/8/3R4/8/8/8/8/4K3 w - - 4 30');
+    m.origins.clear();
+    m.origins.set('d8', { home: 'd8' });
+    m.origins.set('h8', { home: 'e8' });
+    m.origins.set('d6', { home: 'a1' });
+    m.origins.set('e1', { home: 'e1' });
+    m.dead.w.push({ type: 'q', homes: ['d1'] });
+    return m;
+  };
+
+  // Baseline: resurrect straight from the pre-capture position.
+  const direct = build();
+  direct.resurrect({ from: 'd6', to: 'd8', home: 'd1' });
+
+  // Through the played-then-undone path the app actually uses.
+  const viaCapture = build();
+  const before = viaCapture.fen();
+  viaCapture.applyMove({ from: 'd6', to: 'd8' });
+  assert(!viaCapture.chess.get('d8') || viaCapture.chess.get('d8').color === 'w',
+    'the capture did not actually happen before the choice');
+  assert(viaCapture.chess.get('d6') === undefined, 'the capturer did not leave its square');
+  const offer = viaCapture.pendingResurrection();
+  assert(offer && offer.homes.join() === 'd1', 'the played capture did not leave a pending offer');
+  const event = viaCapture.takeHomecoming('d1');
+
+  assert(event.undone && event.undone.kind === 'move' && event.undone.san,
+    'the rolled-back capture was not reported back to the caller for its animation');
+  assert(viaCapture.fen() === direct.fen(),
+    `rollback drifted\n${viaCapture.fen()}\n${direct.fen()}`);
+  assert(JSON.stringify(viaCapture.dead) === JSON.stringify(direct.dead), 'rollback drifted the graveyards');
+  assert(JSON.stringify([...viaCapture.origins].sort()) === JSON.stringify([...direct.origins].sort()),
+    'rollback drifted the origin map');
+  assert(viaCapture.ply === direct.ply, 'rollback drifted the ply count');
+  assert(viaCapture.log.length === direct.log.length && viaCapture.log.every((e) => e.kind !== 'move'),
+    'the undone capture was left in the move log');
+  assert(viaCapture.serializedActions().length === direct.serializedActions().length,
+    'the undone capture leaked into the saved actions');
+  assert(before === event.fenBefore, 'the resurrection did not start from the pre-capture position');
+  ok('a played capture rolls back exactly, leaving no trace of the move it undid');
+}
+
+{
+  // Keeping the capture must simply let it stand.
+  const m = new ExchangeMatch('keep');
+  m.chess.load('3q3k/8/3R4/8/8/8/8/4K3 w - - 4 30');
+  m.origins.clear();
+  m.origins.set('d8', { home: 'd8' });
+  m.origins.set('h8', { home: 'e8' });
+  m.origins.set('d6', { home: 'a1' });
+  m.origins.set('e1', { home: 'e1' });
+  m.dead.w.push({ type: 'q', homes: ['d1'] });
+  m.applyMove({ from: 'd6', to: 'd8' });
+  assert(m.pendingResurrection(), 'no offer was pending');
+  m.keepCapture();
+  assert(m.pendingResurrection() === null, 'the offer did not lapse');
+  assert(m.chess.get('d8')?.type === 'r' && m.chess.get('d8')?.color === 'w', 'the rook did not keep the square');
+  assert(m.dead.b.some((e) => e.type === 'q'), 'the taken queen did not reach the opponent graveyard');
+  assert(m.dead.w.length === 1, 'keeping the capture wrongly consumed a graveyard entry');
+  assert(m.turn() === 'b', 'keeping the capture did not pass the turn');
+  ok('keeping the capture leaves it standing and lapses the offer');
+}
+
 {
   // Threefold repetition ends the game. Knights shuffle out and back twice:
   // the start position stands for the third time.

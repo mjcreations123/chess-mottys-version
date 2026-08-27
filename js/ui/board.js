@@ -161,6 +161,46 @@ export class BoardView {
     this.busy = false;
   }
 
+  // Rewind a capture that was played a moment ago: the capturer slides back
+  // to where it came from and the piece it took fades in again. Captures can
+  // never be castles or en passant here (a pawn victim is never eligible),
+  // so the only extra case is a capture that promoted.
+  async animateUndoCapture({ from, to, victimSquare, victim, wasPromotion, color }) {
+    const version = this.renderVersion;
+    this.busy = true;
+    const mover = this.pieces.get(to);
+    if (mover) {
+      this.pieces.delete(to);
+      if (wasPromotion) {
+        mover.dataset.type = 'p';
+        mover.innerHTML = pieceUse(color, 'p');
+      }
+      mover.classList.add('piece--sliding');
+      this.#place(mover, from);
+      await wait(this.reduceMotion ? 0 : 185);
+      if (version !== this.renderVersion) { this.busy = false; return; }
+      this.pieces.set(from, mover);
+      mover.classList.remove('piece--sliding');
+    }
+    if (victim && !this.pieces.has(victimSquare)) {
+      const elm = this.#spawn(victimSquare, victim);
+      const cell = this.el.querySelector(`[data-sq="${victimSquare}"]`);
+      cell?.classList.add('sq--spared');
+      if (!this.reduceMotion) {
+        const resting = elm.style.transform;
+        const animation = elm.animate([
+          { transform: `${resting} scale(.55)`, opacity: 0 },
+          { transform: `${resting} scale(1.06)`, opacity: 1, offset: .7 },
+          { transform: `${resting} scale(1)`, opacity: 1 },
+        ], { duration: 300, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'forwards' });
+        await Promise.race([animation.finished.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 460))]);
+      }
+      if (version !== this.renderVersion) { this.busy = false; return; }
+      cell?.classList.remove('sq--spared');
+    }
+    this.busy = false;
+  }
+
   // A dead piece coming home: a burst on the home square, and the piece
   // scales in from nothing where it started the game.
   async animateResurrection({ square, color, type }) {
@@ -498,8 +538,8 @@ export class BoardView {
     }
     this.#cancelPromotion();
     for (const transient of this.el.querySelectorAll('.return-burst, .promo')) transient.remove();
-    for (const cell of this.el.querySelectorAll('.sq--homecoming')) {
-      cell.classList.remove('sq--homecoming');
+    for (const cell of this.el.querySelectorAll('.sq--homecoming, .sq--spared')) {
+      cell.classList.remove('sq--homecoming', 'sq--spared');
     }
   }
 }
