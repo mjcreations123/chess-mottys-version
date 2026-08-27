@@ -17,19 +17,23 @@
 // (LEVELS[x].timeMs), so anything else competing for CPU makes the numbers
 // lie: a loaded machine quietly turns Expert into Average.
 //
-// What this measured, 2026-08-27. Before the retune all three levels were the
-// same opponent to anyone below club strength, because captures are resolved
-// at every leaf and so even a two-ply search never hangs a piece:
+// What this measured, 2026-08-27. Every level used to be the same opponent to
+// anyone below club strength, because captures are resolved at every leaf and
+// so even a two-ply search never hangs a piece. Percentages are how often the
+// OPPONENT wins:
 //
-//                    novice wins   casual player wins
-//   Casual  before          4%              2%
-//   Average before          0%              0%
-//   Expert  before          6%              0%
-//   Casual  after          18%             68%
+//                     novice   casual player   good player
+//   Casual  before       4%          2%             -
+//   Average before       0%          0%             -
+//   Expert  before       6%          0%             -
 //
-// The knob that moved it was scoreNoise, not depth and not quiescence.
-// Turning quiescence off bought less and hung far more, and it makes the
-// search's optimism flip with the parity of the depth.
+//   Casual  now         13%         88%           100%
+//   Average now          0%          0%            67%
+//   Expert  now          -           -              0%   (8 games, 8 mates)
+//
+// The knobs that moved Casual were scoreNoise and flatEval, not depth. Turning
+// quiescence off was tried and rejected: it bought less and hung far more, and
+// it makes the search's optimism flip with the parity of the depth.
 
 import { Chess } from '../js/vendor/chess.js';
 import { ExchangeMatch, resurrectionFen, replayMatch } from '../js/core/exchange.js';
@@ -52,8 +56,9 @@ const PROBE_MS = { easy: 140, medium: 260, hard: 420 };
 // Everything a reference is allowed to look at, so none of them can reach
 // into the engine by accident.
 function view(match) {
-  const chess = new Chess(match.fen());
-  return { chess, moves: chess.moves({ verbose: true }) };
+  const fen = match.fen();
+  const chess = new Chess(fen);
+  return { fen, chess, moves: chess.moves({ verbose: true }), vouchers: match.vouchers() };
 }
 
 // Is the square defended by the side that is NOT to move? Used by the
@@ -133,10 +138,33 @@ export const REFERENCES = {
     },
   },
 
+  // A real player. Three plies with the captures resolved at the end of them,
+  // and an actual positional opinion. Deliberately built from the same search
+  // as MottyBot but pinned to a FIXED configuration that no difficulty level
+  // can change, so it stays the same yardstick from week to week.
+  //
+  // This one stands in for someone who is genuinely good at chess. It is the
+  // yardstick for Average: a good player should beat Average, and should still
+  // lose to Expert.
+  clubPlayer: {
+    label: 'club player',
+    stands_for: 'three plies with the captures resolved, and a positional opinion',
+    pick(state, rng, seed) {
+      const move = think(state.fen, 'medium', seed, {
+        maxDepth: 3, timeMs: 1500, scoreNoise: 0, endgameBonus: 0,
+        flatEval: false, vouchers: state.vouchers,
+      });
+      if (!move) return state.moves[rng.int(state.moves.length)];
+      return state.moves.find((m) => m.from === move.from && m.to === move.to
+        && (m.promotion || undefined) === (move.promotion || undefined))
+        || state.moves[rng.int(state.moves.length)];
+    },
+  },
+
   // Two plies of honest minimax on material alone, no quiescence. Sees a
   // capture and the recapture, so it wins a piece when one is offered and
-  // does not usually give one away. This is the ceiling a casual player
-  // reaches after a while, and Average should be beating it.
+  // does not usually give one away. This is roughly someone who plays
+  // occasionally and is not especially good at it.
   improver: {
     label: 'two-ply improver',
     stands_for: 'sees the capture and the recapture, nothing further',
@@ -249,10 +277,10 @@ function botTurn(match, level, seed, probeMs, override) {
 // One reference turn. The reference picks by its own rule, then takes any
 // homecoming it is offered: getting a piece back is the obvious read of the
 // rule, and it keeps the references simple enough to reason about.
-function referenceTurn(match, reference, rng) {
+function referenceTurn(match, reference, rng, seed) {
   const state = view(match);
   if (!state.moves.length) return null;
-  const choice = reference.pick(state, rng);
+  const choice = reference.pick(state, rng, seed);
   const applied = match.applyMove({ from: choice.from, to: choice.to, promotion: choice.promotion });
   const offer = match.pendingResurrection();
   if (offer) {
@@ -289,7 +317,7 @@ export function playGame({ level, reference, seed, botIsWhite, probeMs, override
       ? botTurn(match, level, `${seed}#${ply}`, probeMs, override)
       : opponentLevel
         ? botTurn(match, opponentLevel, `${seed}#opp#${ply}`, PROBE_MS[opponentLevel] ?? 260)
-        : referenceTurn(match, reference, rng);
+        : referenceTurn(match, reference, rng, `${seed}#ref#${ply}`);
     if (!kind) break;
     if (turn === botColor) {
       botMoves++;

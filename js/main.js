@@ -17,15 +17,15 @@ const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const BOTS = {
   easy: {
     name: 'MottyBot', label: 'Casual', level: 'easy', minThink: 600,
-    blurb: 'Looks one move ahead and misreads plenty. Good for learning the rule.',
+    blurb: 'Counts the pieces and not much else. Anyone can beat it.',
   },
   medium: {
     name: 'MottyBot', label: 'Average', level: 'medium', minThink: 900,
-    blurb: 'Thinks several moves ahead and takes whatever you leave loose.',
+    blurb: 'A real opponent. Punishes a loose piece, but you can out-think it.',
   },
   hard: {
     name: 'MottyBot', label: 'Expert', level: 'hard', minThink: 1200,
-    blurb: 'Searches as deep as its clock allows and weighs every homecoming.',
+    blurb: 'Searches as deep as its clock allows and gives you nothing.',
   },
 };
 
@@ -164,7 +164,11 @@ async function requestBotMove(fen, level) {
 // Ask MottyBot to compare candidate positions: the plain chess move first,
 // then each possible homecoming. Ties keep the plain move.
 async function requestBotChoice(fens, vouchersList) {
-  const probeMs = state.bot.level === 'hard' ? 420 : state.bot.level === 'medium' ? 260 : 140;
+  // Every level judges a homecoming to the same depth, so every level gets the
+  // same clock to reach it. Weighing the house rule is not a difficulty
+  // setting: a weak opponent should be bad at chess, not confused about what
+  // the rules let it do.
+  const probeMs = 500;
   return requestWorker({
     kind: 'choose',
     fens,
@@ -484,7 +488,7 @@ function panelSetup() {
   let level = 'medium';
   let color = 'w';
   panel.innerHTML = `
-    <div class="desk-head"><h1>Choose your match.</h1><p>Higher levels make stronger chess moves and judge every homecoming more sharply.</p></div>
+    <div class="desk-head"><h1>Choose your match.</h1><p>All three play the house rule in full. What rises is how far ahead they see and how little they give away.</p></div>
     <div class="desk-body">
       <p class="section-title">Difficulty</p>
       <div class="difficulty-list" id="difficulty-list">

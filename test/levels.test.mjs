@@ -23,8 +23,8 @@ const falling = (field) => ORDER.every((level, i) => i === 0
   assert(rising('timeMs'), 'thinking time does not rise with difficulty');
   assert(falling('scoreNoise'), 'the haze does not thin out as difficulty rises');
   assert(LEVELS.hard.scoreNoise === 0, 'Expert must see the position clearly');
-  assert(rising('claimScale'), 'grasp of the house rule does not rise with difficulty');
-  assert(rising('probeDepth'), 'exchange judgment does not sharpen with difficulty');
+  assert(ORDER.every((level) => LEVELS[level].probeDepth === LEVELS.hard.probeDepth),
+    'the levels judge a homecoming to different depths; the rules are not a difficulty setting');
   assert(LEVELS.easy.label === 'Casual' && LEVELS.medium.label === 'Average'
     && LEVELS.hard.label === 'Expert', 'the level labels drifted');
   ok('the three levels are configured as a ladder on every axis');
@@ -109,20 +109,36 @@ const falling = (field) => ORDER.every((level, i) => i === 0
   ok('Casual still takes a free queen and still finishes a mate in one');
 }
 
-// This week's house rule is the point of the game, so how well a level grasps
-// it is part of the difficulty, not a detail. Casual barely uses its
-// graveyard; Expert treats it as material in the bank.
+// Every level understands this week's house rule completely. A weak opponent
+// is weak at chess; it is never confused about what the rules let it do, and
+// it never values its own graveyard at less than what it is worth.
 {
   const fen = '1n2k3/8/8/8/8/8/PPP5/4K3 w - - 0 20';
   const held = { w: [{ type: 'n', homes: ['b1'] }], b: [] };
-  const base = evaluateFen(fen, null);
-  const grasp = {};
-  for (const level of ORDER) grasp[level] = evaluateFen(fen, held, LEVELS[level].claimScale) - base;
-  console.log(`  values a dead knight at: casual ${Math.round(grasp.easy)}, average ${Math.round(grasp.medium)}, expert ${Math.round(grasp.hard)}`);
-  assert(grasp.easy > 0, 'Casual is blind to the house rule entirely');
-  assert(grasp.easy < grasp.medium && grasp.medium < grasp.hard,
-    `grasp of the house rule did not rise with difficulty: ${JSON.stringify(grasp)}`);
-  ok('the levels understand this week\'s rule by degrees');
+  const plain = evaluateFen(fen, held) - evaluateFen(fen, null);
+  const flat = evaluateFen(fen, held, { flatEval: true }) - evaluateFen(fen, null, { flatEval: true });
+  console.log(`  values a dead knight at: ${Math.round(plain)} normally, ${Math.round(flat)} on a flat evaluation`);
+  assert(plain > 0, 'a live claim is worth nothing');
+  assert(Math.abs(plain - flat) < 1,
+    `Casual's flat evaluation changed what the house rule is worth: ${Math.round(plain)} vs ${Math.round(flat)}`);
+  ok('every level values the house rule in full, whatever its skill');
+}
+
+// Casual counts material and nothing else. That is what makes it unskilled
+// rather than merely random: it will not develop, will not tuck its king away,
+// and will not notice a ruined pawn structure, but it still knows a rook is
+// worth more than a knight.
+{
+  const opening = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  const developed = 'rnbqkbnr/pppppppp/8/8/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 3';
+  const normalGap = evaluateFen(developed, null) - evaluateFen(opening, null);
+  const flatGap = evaluateFen(developed, null, { flatEval: true })
+    - evaluateFen(opening, null, { flatEval: true });
+  assert(Math.abs(normalGap) > 20,
+    `the normal evaluation cannot tell a developed position from the start: ${Math.round(normalGap)}`);
+  assert(Math.abs(flatGap) < 1,
+    `Casual's flat evaluation still has an opinion about development: ${Math.round(flatGap)}`);
+  ok('Casual judges by material alone');
 }
 
 {

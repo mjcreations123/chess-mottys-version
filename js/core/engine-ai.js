@@ -97,6 +97,11 @@ for (let r = 0; r < 8; r++) {
 const pstIndex = (sq, color) => (color === WHITE ? (7 - rankOf(sq)) * 8 + fileOf(sq) : rankOf(sq) * 8 + fileOf(sq));
 
 /* ---------------- levels ---------------- */
+// Every level weighs a homecoming to the same depth. Judging the house rule is
+// not a difficulty setting: the rules are the rules, and a weak opponent that
+// did not understand its own graveyard would just look broken.
+const PROBE_DEPTH = 4;
+
 // Three genuinely different opponents. They differ along three axes on
 // purpose, because depth alone does not separate them: with captures resolved
 // at every leaf, even a two-ply search never hangs a piece, which is why the
@@ -104,19 +109,23 @@ const pstIndex = (sq, color) => (color === WHITE ? (7 - rankOf(sq)) * 8 + fileOf
 //
 //   maxDepth   how far ahead it looks
 //   scoreNoise how clearly it sees what it looked at
-//   claimScale how well it understands this week's house rule
+//   flatEval   whether it understands anything beyond material
+//
+// All three understand this week's house rule completely and judge a
+// homecoming at the same depth. A weak level is weak at CHESS; it is never
+// confused about what the rules let it do.
 export const LEVELS = {
   easy: {
     label: 'Casual', maxDepth: 1, timeMs: 300,
-    scoreNoise: 260, endgameBonus: 2, claimScale: 0.25, probeDepth: 1,
+    scoreNoise: 300, flatEval: true, endgameBonus: 2, probeDepth: PROBE_DEPTH,
   },
   medium: {
-    label: 'Average', maxDepth: 5, timeMs: 1100,
-    scoreNoise: 40, endgameBonus: 4, claimScale: 0.7, probeDepth: 3,
+    label: 'Average', maxDepth: 3, timeMs: 1100,
+    scoreNoise: 55, endgameBonus: 4, probeDepth: PROBE_DEPTH,
   },
   hard: {
     label: 'Expert', maxDepth: 24, timeMs: 4500,
-    scoreNoise: 0, endgameBonus: 12, claimScale: 1, probeDepth: 5,
+    scoreNoise: 0, endgameBonus: 12, probeDepth: PROBE_DEPTH,
   },
 };
 
@@ -133,8 +142,8 @@ const TYPE_CODE = { n: KNIGHT, b: BISHOP, r: ROOK, q: QUEEN };
 
 // Turn the match's graveyards into something the 0x88 board can read fast.
 // Duplicate claims on one kind decay, because a single turn redeems one.
-export function compileClaims(vouchers, scale = 1) {
-  if (!vouchers || scale <= 0) return null;
+export function compileClaims(vouchers) {
+  if (!vouchers) return null;
   const side = (list) => {
     const seen = new Map();
     const out = [];
@@ -146,7 +155,7 @@ export function compileClaims(vouchers, scale = 1) {
       out.push({
         type,
         homes: entry.homes.map(nameToSquare),
-        weight: scale / (rank + 1),
+        weight: 1 / (rank + 1),
       });
     }
     return out;
@@ -176,6 +185,10 @@ function claimValue(squares, claims, enemyCounts) {
 /* ---------------- evaluation ---------------- */
 function evaluate(board) {
   const sq = board.squares;
+  // A flat evaluation counts material and nothing else. No development, no
+  // king safety, no pawn structure: the mating drive stays so a won game
+  // still gets finished.
+  const flat = board.flatEval === true;
   let score = 0;                 // white's point of view
   let forceW = 0, forceB = 0;    // non-king, non-pawn+pawn material
   let nonPawn = 0;
@@ -201,19 +214,22 @@ function evaluate(board) {
     if (type === PAWN) {
       if (color === WHITE) pawnFilesW[fileOf(s)]++; else pawnFilesB[fileOf(s)]++;
     }
-    const v = base + PST[type][pstIndex(s, color)];
+    const v = flat ? base : base + PST[type][pstIndex(s, color)];
     score += color === WHITE ? v : -v;
   }
 
   const endgame = nonPawn <= 2200;
-  const kingTable = endgame ? KING_END : PST[KING];
-  if (kingW >= 0) score += kingTable[pstIndex(kingW, WHITE)];
-  if (kingB >= 0) score -= kingTable[pstIndex(kingB, 1)];
+  if (!flat) {
+    const kingTable = endgame ? KING_END : PST[KING];
+    if (kingW >= 0) score += kingTable[pstIndex(kingW, WHITE)];
+    if (kingB >= 0) score -= kingTable[pstIndex(kingB, 1)];
 
-  if (bishopsW >= 2) score += 28;
-  if (bishopsB >= 2) score -= 28;
+    if (bishopsW >= 2) score += 28;
+    if (bishopsB >= 2) score -= 28;
+  }
 
   for (let f = 0; f < 8; f++) {
+    if (flat) break;
     if (pawnFilesW[f] > 1) score -= (pawnFilesW[f] - 1) * 12;
     if (pawnFilesB[f] > 1) score += (pawnFilesB[f] - 1) * 12;
     const isolatedW = pawnFilesW[f] && !(pawnFilesW[f - 1] || 0) && !(pawnFilesW[f + 1] || 0);
@@ -247,9 +263,10 @@ function evaluate(board) {
 }
 
 // A testing seam: the static verdict on one position, with no search at all.
-export function evaluateFen(fen, vouchers, claimScale = 1) {
+export function evaluateFen(fen, vouchers, { flatEval = false } = {}) {
   const board = new FastBoard(fen);
-  board.claims = compileClaims(vouchers, claimScale);
+  board.claims = compileClaims(vouchers);
+  board.flatEval = flatEval;
   return evaluate(board);
 }
 
@@ -394,7 +411,8 @@ export function think(fen, level, seed, opts = {}) {
   const cfg = { ...(LEVELS[level] || LEVELS.medium), ...opts };
   const rng = makeRng(seedFromString(String(seed ?? 'mottybot')));
   const board = new FastBoard(fen);
-  board.claims = compileClaims(cfg.vouchers, cfg.claimScale ?? 1);
+  board.claims = compileClaims(cfg.vouchers);
+  board.flatEval = cfg.flatEval === true;
   const rootMoves = board.legalMoves();
   if (!rootMoves.length) return null;
 
