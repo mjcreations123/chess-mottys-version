@@ -29,6 +29,8 @@ function expectThrow(fn, pattern, message) {
   throw new Error(`ASSERT: ${message}: did not throw`);
 }
 
+function placement(fen) { return fen.split(' ')[0]; }
+
 let offers = 0;
 let homecomings = 0;
 let keeps = 0;
@@ -44,7 +46,10 @@ for (let game = 0; game < GAMES; game++) {
     const options = match.resurrectionOptions(chosen);
 
     if (!options) {
+      const beforeFen = match.fen();
       match.applyMove({ from: chosen.from, to: chosen.to, promotion: chosen.promotion });
+      assert(placement(match.fen()) !== placement(beforeFen),
+        `normal move did not change board placement in lifecycle game ${game}:${ply}`);
       match.keepCapture();
       continue;
     }

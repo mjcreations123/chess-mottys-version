@@ -20,12 +20,16 @@ assert(board.includes("this.el.querySelectorAll('.overlay--hl')"),
   'last-move paint cannot clean up stray highlight nodes');
 assert(board.includes('this.#clearAllOverlays()'),
   'full board recovery does not clear stale overlays');
+assert(board.includes('Never paint a yellow "last move" on empty squares'),
+  'last-move paint is not guarded by a real destination piece');
 ok('board recovery validates DOM pieces and clears stale highlights');
 
 assert(main.includes('const matchingMove = legal.find') && main.includes('worker response is advisory'),
   'MottyBot does not validate worker moves against the current legal position');
-assert(main.includes('syncBoard();\n\n    if (action.kind === \'resurrect\')'),
+assert(main.includes('syncBoard({ force: true });\n\n    if (action.kind === \'resurrect\')'),
   'MottyBot does not repair the visible board before animating its next move');
+assert(main.includes('syncBoard({ force: true })'),
+  'settled turns do not force a complete board reconciliation');
 ok('MottyBot preflights worker moves against the live board state');
 
 summary('ui-contract.test.mjs');

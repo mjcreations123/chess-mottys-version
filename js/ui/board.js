@@ -279,7 +279,14 @@ export class BoardView {
     // Do not rely solely on the map here. A previous interrupted render must
     // never be able to leave a stray yellow last-move highlight visible.
     for (const overlay of this.el.querySelectorAll('.overlay--hl')) overlay.remove();
-    if (from) { this.#overlay(`last:${from}`, from, 'overlay--hl'); this.#overlay(`last:${to}`, to, 'overlay--hl'); }
+    // Never paint a yellow "last move" on empty squares. If an interrupted
+    // render ever fails to produce the destination piece, omit the cue and
+    // let the mandatory full sync repair the board instead of lying about a
+    // move the player cannot see.
+    const target = to && this.pieces.get(to);
+    if (!from || !target || !target.isConnected || target.parentElement !== this.el) return;
+    this.#overlay(`last:${from}`, from, 'overlay--hl');
+    this.#overlay(`last:${to}`, to, 'overlay--hl');
   }
   // Point at the live opportunities. Passing nothing clears them.
   setOpportunities({ targets = [] } = {}) {

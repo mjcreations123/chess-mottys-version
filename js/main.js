@@ -208,9 +208,14 @@ function kingSquare(color, fen = state.match?.fen()) {
 // returns to the present.
 function reviewing() { return state.browse !== null; }
 
-function syncBoard() {
+function syncBoard({ force = false } = {}) {
   if (!state.match || reviewing()) return;
-  board.verify(positionMap());
+  const position = positionMap();
+  // Once a turn has settled, correctness matters more than preserving an
+  // in-flight animation node. A forced repaint guarantees that a missing,
+  // duplicated, or visually stale piece cannot survive into the next turn.
+  if (force) board.setPosition(position);
+  else board.verify(position);
 }
 
 function updateCheckMark(fen = state.match?.fen()) {
@@ -780,7 +785,7 @@ async function playMoveAnimation(move, { instant = false } = {}) {
   if (state.match !== match || state.serial !== serial) return false;
   state.animating = false;
   if (state.over) return false;
-  syncBoard();
+  syncBoard({ force: true });
   // syncBoard may need to rebuild the entire board; only paint the current
   // move after that recovery so stale yellow squares cannot survive it.
   board.setLastMove(move.from, move.to);
@@ -851,7 +856,7 @@ async function playResurrection(event, byBot) {
   if (state.match !== match || state.serial !== serial) return false;
   state.animating = false;
   if (state.over) return false;
-  syncBoard();
+  syncBoard({ force: true });
   board.setLastMove(event.declined.victimSquare, event.home);
   renderLive();
   renderMoveList();
@@ -963,7 +968,7 @@ async function botLoop(serial) {
     // interrupted animation left in the DOM. This makes a renderer repair
     // happen before the next piece tries to move, not after a player has
     // already seen a phantom turn.
-    syncBoard();
+    syncBoard({ force: true });
 
     if (action.kind === 'resurrect') {
       // Show the take, then show it being taken back: MottyBot plays the
@@ -1048,7 +1053,7 @@ async function handleUserMove({ from, to, promotion, instant }) {
     move = match.applyMove({ from, to, promotion });
   } catch {
     sound.illegal();
-    syncBoard();
+    syncBoard({ force: true });
     return;
   }
   setYourTurn(false);

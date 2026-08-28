@@ -1,10 +1,11 @@
-// v9 is the first Prisoner Exchange format. Older saves are Black Hole Chess
-// games; the rules that could replay them are gone, so they are discarded
-// rather than migrated.
-const ACTIVE_KEY = 'mv-active-v9';
-const OBSOLETE_ACTIVE_KEYS = ['mv-active-v8', 'mv-active-v7', 'mv-active-v6'];
+// v10 starts a clean saved-game boundary after the renderer and deferred-turn
+// transaction were hardened. A v9 action list may be legal chess, but it can
+// have been created while the board view could drift from the authoritative
+// position, so it is deliberately not resumed into the repaired build.
+const ACTIVE_KEY = 'mv-active-v10';
+const OBSOLETE_ACTIVE_KEYS = ['mv-active-v9', 'mv-active-v8', 'mv-active-v7', 'mv-active-v6'];
 const STATS_KEY = 'mv-stats-v3';
-const RULES_KEY = 'mv-rules-seen-v9';
+const RULES_KEY = 'mv-rules-seen-v10';
 
 const read = (key, fallback) => {
   try {
@@ -18,7 +19,7 @@ const read = (key, fallback) => {
 export function loadActive() {
   const data = read(ACTIVE_KEY, null);
   const valid = data
-    && data.version === 9
+    && data.version === 10
     && typeof data.seed === 'string'
     && Array.isArray(data.actions)
     && ['w', 'b'].includes(data.myColor)
@@ -29,7 +30,7 @@ export function loadActive() {
 export function saveActive({ seed, actions, myColor, level, startedAt = Date.now() }) {
   try {
     localStorage.setItem(ACTIVE_KEY, JSON.stringify({
-      version: 9,
+      version: 10,
       seed,
       actions,
       myColor,

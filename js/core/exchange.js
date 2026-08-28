@@ -189,7 +189,15 @@ export class ExchangeMatch {
     const offer = this.#couldOffer(to) ? this.resurrectionOptions({ from, to, promotion }) : null;
     const snapshot = offer ? this.#snapshot() : null;
     this.pendingOffer = null;
+    const placementBefore = this.chess.fen().split(' ')[0];
     const move = this.chess.move({ from, to, promotion: promotion || undefined });
+    // A normal chess move must alter the board, not merely hand the turn to
+    // the other side. This guards the game model against a future caller
+    // treating a null move or stale worker response as a real action.
+    if (this.chess.fen().split(' ')[0] === placementBefore) {
+      this.chess.load(move.before);
+      throw new Error('a move must change the board placement');
+    }
 
     if (move.captured) {
       const victimColor = otherColor(move.color);
