@@ -44,6 +44,8 @@ for (const level of ['easy', 'medium', 'hard']) {
         }
       }
       m.applyMove(mv); // applyMove throws if illegal
+      // A plain action means the bot consciously kept any qualifying capture.
+      m.keepCapture();
     }
   }
   ok(`${level}: bot vs bot exchange games all legal (${taken} homecomings taken)`);

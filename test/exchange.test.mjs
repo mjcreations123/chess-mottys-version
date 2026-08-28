@@ -14,6 +14,7 @@ function play(...moves) {
     if (!move) throw new Error(`test fixture: no legal move ${JSON.stringify(item)} at ${feed.fen()}`);
     feed.move(move);
     match.applyMove({ from: move.from, to: move.to, promotion: move.promotion });
+    match.keepCapture();
   }
   return match;
 }

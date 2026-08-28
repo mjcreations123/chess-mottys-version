@@ -64,6 +64,8 @@ for (let game = 0; game < GAMES; game++) {
       if (chosen.flags.includes('k') || chosen.flags.includes('q')) castles++;
       if (chosen.flags.includes('e')) enPassants++;
       match.applyMove({ from: chosen.from, to: chosen.to, promotion: chosen.promotion });
+      // This branch intentionally declines an available homecoming.
+      match.keepCapture();
     }
     turns++;
 

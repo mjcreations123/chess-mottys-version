@@ -78,13 +78,20 @@ export class ExchangeMatch {
     const [board, turn, castling, ep] = this.chess.fen().split(' ');
     // The graveyards are part of the position: the same board with different
     // dead pieces offers different futures, so it is not the same position.
-    // (Piece identity inside the origin map is ignored, the same way ordinary
-    // repetition ignores which of two identical knights stands where.)
+    // So are original-piece identities. Unlike ordinary chess, two identical
+    // knights are NOT interchangeable here: capturing the b1-born knight can
+    // return it only to b1, while a g1-born knight is owed g1. A visible
+    // board repeat after those knights swap places is therefore not a
+    // repeat of the game state under Prisoner Exchange.
     const grave = (color) => this.dead[color]
       .map((entry) => entry.type + (entry.homes ? entry.homes.join('') : ''))
       .sort()
       .join(',');
-    const key = `${board} ${turn} ${castling} ${ep} | ${grave('w')} | ${grave('b')}`;
+    const origins = [...this.origins.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([square, origin]) => `${square}:${origin.home ? `home:${origin.home}` : `promoted:${origin.promoted || '?'}`}`)
+      .join(',');
+    const key = `${board} ${turn} ${castling} ${ep} | ${grave('w')} | ${grave('b')} | ${origins}`;
     const count = (this.positionCounts.get(key) || 0) + 1;
     this.positionCounts.set(key, count);
     if (count >= 3) this.repetitionDraw = true;
@@ -169,6 +176,12 @@ export class ExchangeMatch {
   }
 
   applyMove({ from, to, promotion }) {
+    // A qualifying capture is a single unresolved turn until its owner says
+    // Keep it or chooses a homecoming. The UI disables the board during that
+    // decision, but the core must enforce the same boundary: otherwise a
+    // late click or future caller could play the opponent's reply and strand
+    // a rollback snapshot from the previous turn.
+    if (this.pendingOffer) throw new Error('a homecoming decision is still pending');
     if (this.status().over) throw new Error('game is over');
     // The capture is played for real first, so the board can show it being
     // taken before anyone decides whether to take it back. If it turns out
@@ -246,6 +259,9 @@ export class ExchangeMatch {
   takeHomecoming(home) {
     const pending = this.pendingOffer;
     if (!pending) throw new Error('no homecoming is pending');
+    if (!pending.offer.homes.includes(home)) {
+      throw new Error(`no dead ${pending.offer.victimType} can return to ${home}`);
+    }
     this.pendingOffer = null;
     const undone = this.log[pending.snapshot.logLength];
     this.#restore(pending.snapshot);
@@ -294,7 +310,11 @@ export class ExchangeMatch {
   // The whole turn: the capture is declined, their piece survives untouched,
   // and the mover's dead piece returns to its starting square instead.
   resurrect({ from, to, promotion, home }) {
-    this.pendingOffer = null;
+    // takeHomecoming() first restores the pre-capture snapshot and then
+    // enters here. A direct call while the "capture shown" state is pending
+    // must not silently clear that state or turn an invalid button press into
+    // an implicit Keep it decision.
+    if (this.pendingOffer) throw new Error('a homecoming decision is still pending');
     const options = this.resurrectionOptions({ from, to, promotion });
     if (!options) throw new Error('that move offers no resurrection');
     if (!options.homes.includes(home)) throw new Error(`no dead ${options.victimType} can return to ${home}`);
@@ -444,6 +464,10 @@ export function replayMatch(seed, actions) {
         to: action.uci.slice(2, 4),
         promotion: action.uci[4],
       });
+      // A serialized plain move is the durable record of a capture that was
+      // kept. A homecoming serializes as its own action instead, so replay
+      // must close any offer here before it advances to the next turn.
+      match.keepCapture();
     } else if (action?.kind === 'resurrect' && typeof action.uci === 'string') {
       match.resurrect({
         from: action.uci.slice(0, 2),
