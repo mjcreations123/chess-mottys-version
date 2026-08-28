@@ -318,23 +318,23 @@ function showNote(title, copy, phase = 'triggered') {
   queueFit();
 }
 
-// The rail beside each name holds that side's fallen pieces: the ones that
-// can still come home. A chip lights up the moment its home square is clear
-// and a matching enemy piece is on the board, because that is exactly when a
-// capture would bring it back.
+// The rail beside each name is the graveyard. It records only what has been
+// lost and where it may return; it must never turn into a hint engine that
+// names the next capture for the player.
 function railHTML(color, mine, delta) {
   const who = mine ? 'Your' : "MottyBot's";
   const chips = state.match.graveyard(color).map((entry) => {
     const name = PIECE_NAMES[entry.type];
-    const where = (entry.open.length ? entry.open : entry.homes).join('/');
-    const cls = entry.ready ? 'ready' : entry.matchOnBoard ? 'blocked' : 'idle';
-    const why = entry.ready ? `ready to come home to ${where}`
-      : entry.matchOnBoard ? `waiting, ${entry.homes.join(' and ')} blocked`
-        : `waiting, no enemy ${name} left to trade for`;
-    return `<span class="chip chip--${cls}" title="${who} ${name}, ${why}">${pieceUse(color, entry.type)}<b>${where}</b><span class="visually-hidden">${who} ${name}, ${why}.</span></span>`;
+    // Show the piece's remembered home, not a live availability readout.
+    // Availability is tactical information the player should discover, not
+    // a changing recommendation from the interface.
+    const where = entry.homes.join('/');
+    const why = `in the graveyard; home is ${where}`;
+    return `<span class="chip chip--dead" title="${who} ${name}, ${why}"><span class="chip__lost" aria-hidden="true">×</span>${pieceUse(color, entry.type)}<b>${where}</b><span class="visually-hidden">${who} ${name}, ${why}.</span></span>`;
   }).join('');
   const score = delta > 0 ? `<span class="rail__score">+${delta}</span>` : '';
-  return chips + score;
+  const label = chips ? '<span class="rail__label" aria-hidden="true">Graveyard</span>' : '';
+  return label + chips + score;
 }
 
 function renderRails() {
@@ -351,31 +351,11 @@ function renderRails() {
   queueFit();
 }
 
-// Ring the enemy pieces whose capture would bring one of yours home, and mark
-// the home squares waiting to receive them. Only while it is genuinely your
-// move: at any other moment the rings would be pointing at nothing.
-// Ring the enemy pieces you could take right now to bring one of yours home,
-// and say in words what the ring means. A mark on a board can only ever be as
-// clear as the sentence next to it, and there was no sentence.
+// Exchange is a rule the player learns and spots for themselves. Do not ring
+// exact victims or spell out a profitable capture before it happens; that
+// makes the graveyard into a move adviser rather than a game mechanic.
 function updateOpportunities() {
-  const myMove = state.match && !state.over && !reviewing()
-    && state.screen === 'playing' && !state.animating
-    && state.match.turn() === state.myColor;
-  if (!myMove) {
-    board.setOpportunities({});
-    return;
-  }
-  const { targets } = state.match.offerTargets();
-  board.setOpportunities({ targets: targets.map((item) => item.square) });
-  if (!targets.length) return;
-
-  const homes = [...new Set(targets.flatMap((item) => item.homes))];
-  const first = targets[0];
-  const copy = targets.length === 1
-    ? `Take the ${PIECE_NAMES[first.type]} on ${first.square} and your ${PIECE_NAMES[first.type]} comes back to ${first.homes.join(' or ')}.`
-    : `${targets.map((item) => `the ${PIECE_NAMES[item.type]} on ${item.square}`).join(', ')}. Take one and yours comes back to ${homes.join(' or ')}.`;
-  showNote(targets.length === 1 ? 'The ringed piece brings one of yours home'
-    : 'The ringed pieces bring one of yours home', copy, 'offer');
+  board.setOpportunities({});
 }
 
 function renderLive() {
@@ -541,9 +521,6 @@ function panelPlaying() {
     <div class="desk-head">
       <div class="match-title"><h2>${escapeHTML(state.bot.name)}</h2><span class="difficulty-label">${escapeHTML(state.bot.label)} difficulty</span></div>
       <p>Capture a piece that matches one of your dead, and you may undo the capture and bring yours home to its starting square instead.</p>
-    </div>
-    <div class="desk-legend">
-      <p><span class="legend-key legend-key--offer" aria-hidden="true"></span>A ringed enemy piece can be taken to bring one of yours home. The bar above the board says which one.</p>
     </div>
     <div class="review-nav" role="group" aria-label="Step back through the game">
       <button id="review-first" type="button" aria-label="First position">|&lsaquo;</button>
@@ -803,8 +780,10 @@ async function playMoveAnimation(move, { instant = false } = {}) {
   if (state.match !== match || state.serial !== serial) return false;
   state.animating = false;
   if (state.over) return false;
-  board.setLastMove(move.from, move.to);
   syncBoard();
+  // syncBoard may need to rebuild the entire board; only paint the current
+  // move after that recovery so stale yellow squares cannot survive it.
+  board.setLastMove(move.from, move.to);
   renderLive();
   renderMoveList();
   updateCheckMark();
@@ -872,8 +851,8 @@ async function playResurrection(event, byBot) {
   if (state.match !== match || state.serial !== serial) return false;
   state.animating = false;
   if (state.over) return false;
-  board.setLastMove(event.declined.victimSquare, event.home);
   syncBoard();
+  board.setLastMove(event.declined.victimSquare, event.home);
   renderLive();
   renderMoveList();
   updateCheckMark();
@@ -980,6 +959,12 @@ async function botLoop(serial) {
     setThinking(false);
     if (!action || state.over || state.screen !== 'playing' || state.match !== match || state.serial !== serial) return;
 
+    // A bot turn begins from the authoritative board, not whatever an
+    // interrupted animation left in the DOM. This makes a renderer repair
+    // happen before the next piece tries to move, not after a player has
+    // already seen a phantom turn.
+    syncBoard();
+
     if (action.kind === 'resurrect') {
       // Show the take, then show it being taken back: MottyBot plays the
       // capture for real and rolls it back, exactly as the player does.
@@ -1020,7 +1005,31 @@ async function botLoop(serial) {
       if (!legal.length) return;
       action = { kind: 'move', move: { from: legal[0].from, to: legal[0].to, promotion: legal[0].promotion } };
     }
-    const move = match.applyMove(action.move);
+    const legal = match.legalMoves();
+    const matchingMove = legal.find((candidate) => candidate.from === action.move.from
+      && candidate.to === action.move.to
+      && (candidate.promotion || undefined) === (action.move.promotion || undefined));
+    if (!matchingMove) {
+      // A worker response is advisory. It is never allowed to create a move
+      // against a board that has since changed; use a current legal fallback
+      // or finish a genuinely terminal position instead.
+      if (!legal.length) {
+        endGame();
+        return;
+      }
+      action = { kind: 'move', move: legal[0] };
+    }
+    let move;
+    try {
+      move = match.applyMove(action.move);
+    } catch {
+      const fallback = match.legalMoves()[0];
+      if (!fallback) {
+        endGame();
+        return;
+      }
+      move = match.applyMove(fallback);
+    }
     match.keepCapture();
     persistGame();
     announce(`MottyBot moved from ${move.from} to ${move.to}.`);

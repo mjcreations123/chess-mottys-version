@@ -98,6 +98,12 @@ export class BoardView {
   /* ---------- pieces ---------- */
   setPosition(map) {
     this.#invalidateTransientState();
+    // A full position paint is the recovery boundary. Remove every overlay
+    // from the DOM, including one that somehow escaped the bookkeeping map,
+    // before rebuilding the pieces. Otherwise an interrupted animation can
+    // leave a yellow "last move" square behind after the board itself has
+    // already advanced to a different truth.
+    this.#clearAllOverlays();
     for (const [, elm] of this.pieces) elm.remove();
     this.pieces.clear();
     for (const [sq, p] of map) this.#spawn(sq, p);
@@ -117,11 +123,16 @@ export class BoardView {
   }
   // hard sync guard: rebuild if the DOM drifted from truth
   verify(map) {
-    let ok = this.pieces.size === map.size;
+    let ok = this.pieces.size === map.size
+      && this.el.querySelectorAll('.piece').length === map.size;
     if (ok) {
       for (const [sq, p] of map) {
         const elm = this.pieces.get(sq);
-        if (!elm || elm.dataset.color !== p.color || elm.dataset.type !== p.type) { ok = false; break; }
+        if (!elm || !elm.isConnected || elm.parentElement !== this.el
+          || elm.dataset.color !== p.color || elm.dataset.type !== p.type) {
+          ok = false;
+          break;
+        }
       }
     }
     if (!ok) this.setPosition(map);
@@ -255,8 +266,19 @@ export class BoardView {
       if (k.startsWith(prefix)) { o.remove(); this.overlays.delete(k); }
     }
   }
+  #clearAllOverlays() {
+    for (const [, overlay] of this.overlays) overlay.remove();
+    this.overlays.clear();
+    // This scan is deliberately redundant with the map. A visual board can
+    // only be trusted if an untracked DOM node cannot outlive a recovery
+    // repaint.
+    for (const overlay of this.el.querySelectorAll('.overlay')) overlay.remove();
+  }
   setLastMove(from, to) {
     this.#clearOverlays('last:');
+    // Do not rely solely on the map here. A previous interrupted render must
+    // never be able to leave a stray yellow last-move highlight visible.
+    for (const overlay of this.el.querySelectorAll('.overlay--hl')) overlay.remove();
     if (from) { this.#overlay(`last:${from}`, from, 'overlay--hl'); this.#overlay(`last:${to}`, to, 'overlay--hl'); }
   }
   // Point at the live opportunities. Passing nothing clears them.

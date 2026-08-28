@@ -284,7 +284,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
   margin-right: auto;
   padding: 3px 0;
 }
+.rail__label {
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
 .chip {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -300,14 +309,20 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .chip svg { width: 19px; height: 19px; opacity: .55; }
 .chip b { font-weight: 700; }
-.chip--blocked { border-style: dashed; }
-.chip--ready {
-  border-color: var(--magic);
-  background: color-mix(in srgb, var(--magic) 17%, var(--surface-2));
-  color: var(--text);
-  box-shadow: 0 0 11px rgba(255, 115, 88, .28);
+.chip--dead { border-color: color-mix(in srgb, var(--quiet) 58%, var(--line)); }
+.chip__lost {
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  margin-left: 1px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--danger) 22%, var(--surface-3));
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
 }
-.chip--ready svg { opacity: 1; }
 .rail__score { margin-left: 3px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .turn-state {
   background: var(--turn);
