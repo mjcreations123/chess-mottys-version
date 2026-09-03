@@ -6,3 +6,4 @@ node_modules/
 .design-dna.lock
 .claude/
 test/neo-ref/
+.design-dna/refs/
