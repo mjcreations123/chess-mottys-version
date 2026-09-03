@@ -1,106 +1,72 @@
-// Hand-drawn piece set in the clean flat "app chess" style: bold rounded
-// outline, soft fills, one shade accent. Original vector art (drawn by eye,
-// not traced), tuned to read instantly at 40-90px.
+// Original piece set: flat solid silhouette, thin single-weight accent line,
+// no cartoon shading or "cute" detail (the old set's knight had a drawn eye
+// dot and a heavy uniform 4.35px outline that read as a toy/mascot set, not
+// a chess set). Geometry composed from scratch, not traced from any existing
+// set or engine.
 
 const THEME = {
-  w: { line: '#30373C', fill: '#F5F2E9', shade: '#CBC5B8', eye: '#30373C' },
-  b: { line: '#121619', fill: '#354149', shade: '#667681', eye: '#E8E4DA' },
+  w: { fill: '#F4F1E8', line: '#2B2620' },
+  b: { fill: '#23282C', line: '#0C0E0F' },
 };
 
-const SW = 4.35; // crisp at phone sizes without the toy-like heavy outline
+const SW = 2.4; // crisp thin line, not a coloring-book outline
 
 function wrap(color, inner) {
   const c = THEME[color];
   return inner
-    .replaceAll('{L}', c.line)
     .replaceAll('{F}', c.fill)
-    .replaceAll('{S}', c.shade)
-    .replaceAll('{E}', c.eye)
+    .replaceAll('{L}', c.line)
     .replaceAll('{W}', String(SW));
 }
 
 const SHAPES = {
-  // Pawn: ball head, collar, flared cone, chunky pedestal
+  // Pawn: ball head, tapered body, plinth. Three shapes, nothing more.
   p: `
-    <path d="M40,46 C39.5,57 36,65.5 31.5,72.5 L68.5,72.5 C64,65.5 60.5,57 60,46 Z"
+    <circle cx="50" cy="30" r="12" fill="{F}" stroke="{L}" stroke-width="{W}"/>
+    <path d="M38,58 C39,48 43,42 50,42 C57,42 61,48 62,58 L67,72 H33 Z"
           fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <circle cx="50" cy="28.5" r="13.5" fill="{F}" stroke="{L}" stroke-width="{W}"/>
-    <path d="M41,42 h18 c2.2,0 3.6,1.5 3.6,3.3 c0,1.8 -1.4,3.3 -3.6,3.3 h-18 c-2.2,0 -3.6,-1.5 -3.6,-3.3 c0,-1.8 1.4,-3.3 3.6,-3.3 z"
-          fill="{F}" stroke="{L}" stroke-width="4.2" stroke-linejoin="round"/>
-    <path d="M31,73 h38 c3,0 5,2 5,5 v5 c0,3 -2,5 -5,5 h-38 c-3,0 -5,-2 -5,-5 v-5 c0,-3 2,-5 5,-5 z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
+    <path d="M28,72 H72 L75,84 H25 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
   `,
-  // Rook: wide crown with two notches, straight tower, stepped foot
+  // Rook: square crenellated tower, straight shaft, plinth.
   r: `
-    <path d="M36.5,44 L34,40 V24 h9.5 v6.5 h6.5 V24 h9.5 V40 L63.5,44 L65,70 H35 Z"
+    <path d="M32,24 H42 V32 H48 V24 H52 V32 H58 V24 H68 V40 L62,46 V70 H38 V46 L32,40 Z"
           fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M33,70.5 h34 c2,0 3.5,1.5 3.5,3.5 v4 h-41 v-4 c0,-2 1.5,-3.5 3.5,-3.5 z"
-          fill="{F}" stroke="{L}" stroke-width="4.4" stroke-linejoin="round"/>
-    <path d="M30,78.5 h40 c3,0 5,2 5,4.75 c0,2.75 -2,4.75 -5,4.75 h-40 c-3,0 -5,-2 -5,-4.75 c0,-2.75 2,-4.75 5,-4.75 z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M36.5,44.5 h27" stroke="{L}" stroke-width="3.6" stroke-linecap="round" fill="none"/>
+    <path d="M30,70 H70 L74,84 H26 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
   `,
-  // Knight: muzzle left, deep jaw, two small ears, mane sweep down the back
+  // Knight: horse-head profile, cut ear notch (not a drawn eye), plinth.
   n: `
-    <path d="M38,80 C36,66 30,58.5 24,53.5 C20,50.5 17,47.5 15.8,44.5 L13.6,39.8
-             C12.6,37.2 14.2,35 16.8,35 C19.4,35 21.2,33.6 22.6,31.2
-             C26.4,25 31.4,20.4 37.4,18.2 C38.6,17.8 39.5,17 39.9,15.7
-             L41.9,9.6 C42.8,6.9 46.2,6.9 46.9,9.7 L48.2,15.4
-             L52.6,8.4 C54.2,5.8 57.6,6.8 57.7,9.9 L57.9,17.3
-             C64.6,22.4 69,30.6 70.3,40.5 C71.9,52.5 70.6,67 68.3,80 Z"
+    <path d="M30,84 C29,66 33,54 42,48 L36,45 L34,40.5 L40.5,38.5 L40,26 C42,22 47,21 50,24
+             L54,28 C62,26 69,31 71,40 L74,58 C75,68 74,77 72,84 Z"
           fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M56,21.5 C62,26.8 65.8,34.6 66.9,44 C68.1,55.5 66.9,68 64.9,78.5 L59.3,78.5
-             C61.4,65.5 61.7,51.5 58.7,42 C56.7,35.5 55.5,27.5 56,21.5 Z"
-          fill="{S}" stroke="none"/>
-    <circle cx="30.5" cy="30" r="2.5" fill="{E}"/>
-    <path d="M17,40 c1.5,0.5 2.8,1.4 3.6,2.6" stroke="{L}" stroke-width="2.6" stroke-linecap="round" fill="none"/>
-    <path d="M30,88 h40 c3,0 5,-2 5,-4 c0,-2.5 -2,-4.5 -5,-4.5 h-40 c-3,0 -5,2 -5,4.5 c0,2 2,4 5,4 z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
+    <path d="M25,84 H75 L78,92 H22 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
   `,
-  // Bishop: ball, pointed mitre with a bold slit, collar, plinth
+  // Bishop: ball finial, tapered mitre with a single diagonal slit, plinth.
   b: `
-    <circle cx="50" cy="12.5" r="4.6" fill="{F}" stroke="{L}" stroke-width="4.2"/>
-    <path d="M50,19.5 C54.5,24.5 60.5,31.5 63,40.5 C65.2,48.5 63.8,57.5 58.5,62.5
-             C54.5,66.2 45.5,66.2 41.5,62.5 C36.2,57.5 34.8,48.5 37,40.5
-             C39.5,31.5 45.5,24.5 50,19.5 Z"
+    <circle cx="50" cy="16" r="4" fill="{F}" stroke="{L}" stroke-width="{W}"/>
+    <path d="M50,23 C58,32 63,42 61,54 C60,62 55,68 50,68 C45,68 40,62 39,54 C37,42 42,32 50,23 Z"
           fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M50.5,29 L58.5,40.5" stroke="{L}" stroke-width="5" stroke-linecap="round" fill="none"/>
-    <path d="M39,66.5 h22 c2.2,0 3.6,1.5 3.6,3.3 c0,1.8 -1.4,3.3 -3.6,3.3 h-22 c-2.2,0 -3.6,-1.5 -3.6,-3.3 c0,-1.8 1.4,-3.3 3.6,-3.3 z"
-          fill="{F}" stroke="{L}" stroke-width="4.2" stroke-linejoin="round"/>
-    <path d="M36,74 C35,76.5 33.5,78 31.5,79.5 L68.5,79.5 C66.5,78 65,76.5 64,74 Z"
-          fill="{F}" stroke="{L}" stroke-width="4.4" stroke-linejoin="round"/>
-    <path d="M31,80 h38 c3,0 5,2 5,4 c0,2.5 -2,4 -5,4 h-38 c-3,0 -5,-1.5 -5,-4 c0,-2 2,-4 5,-4 z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
+    <path d="M40,34 L60,50" stroke="{L}" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+    <path d="M33,68 H67 L70,80 H30 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
   `,
-  // Queen: five-ball coronet with shallow points, smooth bell gown
+  // Queen: five-point coronet, bell gown, plinth.
   q: `
-    <path d="M27.5,58 L20.5,32 L33.5,42.5 L36,24 L45,40.5 L50,21.5 L55,40.5 L64,24 L66.5,42.5 L79.5,32 L72.5,58
-             C70,64 68.5,68 68,72 H32 C31.5,68 30,64 27.5,58 Z"
+    <path d="M24,54 L20,30 L32,40 L38,20 L50,34 L62,20 L68,40 L80,30 L76,54 L70,68 H30 Z"
           fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <circle cx="19.5" cy="27" r="4.3" fill="{F}" stroke="{L}" stroke-width="3.8"/>
-    <circle cx="35" cy="19.5" r="4.3" fill="{F}" stroke="{L}" stroke-width="3.8"/>
-    <circle cx="50" cy="16.5" r="4.3" fill="{F}" stroke="{L}" stroke-width="3.8"/>
-    <circle cx="65" cy="19.5" r="4.3" fill="{F}" stroke="{L}" stroke-width="3.8"/>
-    <circle cx="80.5" cy="27" r="4.3" fill="{F}" stroke="{L}" stroke-width="3.8"/>
-    <path d="M34,73 C33.5,75.5 32.5,77.5 31,79.5 L69,79.5 C67.5,77.5 66.5,75.5 66,73 Z"
-          fill="{F}" stroke="{L}" stroke-width="4.4" stroke-linejoin="round"/>
-    <path d="M30,80 h40 c3,0 5,2 5,4 c0,2.5 -2,4 -5,4 h-40 c-3,0 -5,-1.5 -5,-4 c0,-2 2,-4 5,-4 z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
+    <circle cx="20" cy="27" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
+    <circle cx="38" cy="17" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
+    <circle cx="50" cy="14" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
+    <circle cx="62" cy="17" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
+    <circle cx="80" cy="27" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
+    <path d="M28,68 H72 L76,82 H24 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
   `,
-  // King: bold cross over a two-lobed crown with a center dip, skirt, plinth
+  // King: cross finial, two-lobe crown, mantle, plinth.
   k: `
-    <path d="M46.8,7.5 h6.4 v6.2 h6.2 v6.4 h-6.2 v6.2 h-6.4 v-6.2 h-6.2 v-6.4 h6.2 z"
-          fill="{F}" stroke="{L}" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M50,34.5 C52,30.5 56,28 60.5,28 C68,28 73.5,33.5 73.5,41.5 C73.5,50 67,56.5 60,60.5 L40,60.5
-             C33,56.5 26.5,50 26.5,41.5 C26.5,33.5 32,28 39.5,28 C44,28 48,30.5 50,34.5 Z"
+    <path d="M47,6 H53 V13 H60 V19 H53 V26 H47 V19 H40 V13 H47 Z"
           fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M38.5,61 L37,72.5 H63 L61.5,61 Z"
-          fill="{F}" stroke="{L}" stroke-width="4.4" stroke-linejoin="round"/>
-    <path d="M35,73 C34.5,75.5 33.5,77.5 32,79.5 L68,79.5 C66.5,77.5 65.5,75.5 65,73 Z"
-          fill="{F}" stroke="{L}" stroke-width="4.4" stroke-linejoin="round"/>
-    <path d="M30,80 h40 c3,0 5,2 5,4 c0,2.5 -2,4 -5,4 h-40 c-3,0 -5,-1.5 -5,-4 c0,-2 2,-4 5,-4 z"
+    <path d="M36,58 C28,52 26,42 32,35 C37,29 45,29 50,35 C55,29 63,29 68,35 C74,42 72,52 64,58 Z"
           fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M50,37 C50,44 50,50 50,57" stroke="{L}" stroke-width="3.2" stroke-linecap="round" fill="none"/>
+    <path d="M35,58 H65 L68,70 H32 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
+    <path d="M28,70 H72 L76,84 H24 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
   `,
 };
 

@@ -26,9 +26,8 @@
 
   <header class="topbar">
     <a class="brand" href="/" aria-label="Chess, Motty's Version home">
-      <svg class="brand__mark" viewBox="0 0 34 34" aria-hidden="true">
-        <path d="M17 3.5c6 0 10.5 4.4 10.5 10.2 0 4.4-2.7 7.3-6.5 9.7v6.1h-8v-6.1c-3.8-2.4-6.5-5.3-6.5-9.7C6.5 7.9 11 3.5 17 3.5Z"/>
-        <path d="M11.5 14.5h11M17 9v11"/>
+      <svg class="brand__mark" viewBox="24 16 56 72" aria-hidden="true">
+        <path d="M30,84 C29,66 33,54 42,48 L36,45 L34,40.5 L40.5,38.5 L40,26 C42,22 47,21 50,24 L54,28 C62,26 69,31 71,40 L74,58 C75,68 74,77 72,84 Z"/>
       </svg>
       <span>Chess <b>(Motty's Version)</b></span>
     </a>
@@ -51,7 +50,9 @@
   <main class="app-shell">
     <section class="arena" aria-label="Current chess game">
       <div class="playerbar playerbar--top" id="row-top">
-        <div class="avatar avatar--bot" id="top-avatar" aria-hidden="true">M</div>
+        <div class="avatar avatar--bot" id="top-avatar" aria-hidden="true">
+          <svg viewBox="24 16 56 72"><path d="M30,84 C29,66 33,54 42,48 L36,45 L34,40.5 L40.5,38.5 L40,26 C42,22 47,21 50,24 L54,28 C62,26 69,31 71,40 L74,58 C75,68 74,77 72,84 Z"/></svg>
+        </div>
         <div class="playerbar__identity">
           <strong id="top-name">MottyBot</strong>
           <span id="top-detail">Average difficulty</span>
@@ -78,7 +79,9 @@
       <p id="board-help" class="visually-hidden">Select a piece by tapping it, clicking it, or focusing the board and pressing Enter, then choose a highlighted destination. A matching capture may offer a choice after it happens: keep the capture, or undo it and bring one of your fallen pieces home.</p>
 
       <div class="playerbar playerbar--bottom" id="row-bottom">
-        <div class="avatar avatar--you" id="bottom-avatar" aria-hidden="true">Y</div>
+        <div class="avatar avatar--you" id="bottom-avatar" aria-hidden="true">
+          <svg viewBox="18 16 64 58"><circle cx="50" cy="30" r="12"/><path d="M38,58 C39,48 43,42 50,42 C57,42 61,48 62,58 L67,72 H33 Z"/></svg>
+        </div>
         <div class="playerbar__identity">
           <strong id="bottom-name">You</strong>
           <span id="bottom-detail">White</span>
@@ -88,7 +91,7 @@
       </div>
 
       <div class="bot-taunt" id="bot-taunt" aria-live="polite" data-empty="true">
-        <span class="bot-taunt__who" aria-hidden="true">M</span>
+        <span class="bot-taunt__who" aria-hidden="true"><svg viewBox="24 16 56 72"><path d="M30,84 C29,66 33,54 42,48 L36,45 L34,40.5 L40.5,38.5 L40,26 C42,22 47,21 50,24 L54,28 C62,26 69,31 71,40 L74,58 C75,68 74,77 72,84 Z"/></svg></span>
         <span class="bot-taunt__line" id="bot-taunt-line"></span>
       </div>
     </section>

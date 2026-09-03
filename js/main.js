@@ -438,11 +438,7 @@ function panelHome() {
             <button class="btn btn--quiet" id="discard-game">Discard</button>
           </div>
         </div>` : ''}
-      <div class="rule-sequence" role="group" aria-label="How the exchange works">
-        <div class="rule-step"><span class="rule-step__number">1</span><div><strong>Lose a piece</strong><p>It waits in your graveyard, remembering the square it started on.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">2</span><div><strong>Take its twin</strong><p>Capture an enemy piece of the same kind. The capture plays out as normal.</p></div></div>
-        <div class="rule-step"><span class="rule-step__number">3</span><div><strong>Then choose</strong><p>Keep it, or take the whole move back: their piece lives and yours walks home.</p></div></div>
-      </div>
+      <p class="rule-flow"><b>Lose a piece</b> and it waits in your graveyard, remembering the square it started on. <b>Take its twin</b> — capture an enemy piece of the same kind, playing out as a normal capture. <b>Then choose:</b> keep it, or take the whole move back and let yours walk home instead.</p>
       <div class="button-stack">
         <button class="btn btn--primary" id="choose-game">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18.5h14M8 18.5l1-7h6l1 7M9 7.5h6M10 4h4v3.5H10Z"/></svg>
@@ -482,13 +478,12 @@ function panelSetup() {
     <div class="desk-head"><h1>Choose your match.</h1><p>All three play the house rule in full. What rises is how far ahead they see and how little they give away.</p></div>
     <div class="desk-body">
       <p class="section-title">Difficulty</p>
-      <div class="difficulty-list" id="difficulty-list">
+      <div class="level-select" id="difficulty-list" role="radiogroup" aria-label="Difficulty">
         ${Object.values(BOTS).map((bot) => `
-          <button class="difficulty" type="button" data-level="${bot.level}" aria-pressed="${bot.level === level}">
-            <strong>${bot.label}</strong><span>${bot.blurb}</span><em>${bot.level === 'easy' ? 'Quick' : bot.level === 'medium' ? 'Balanced' : 'Deep'}</em>
-          </button>`).join('')}
+          <button type="button" data-level="${bot.level}" aria-pressed="${bot.level === level}">${bot.label}</button>`).join('')}
       </div>
-      <p class="section-title" style="margin-top:20px">Your color</p>
+      <p class="level-blurb" id="level-blurb">${BOTS[level].blurb}</p>
+      <p class="section-title">Your color</p>
       <div class="color-choice" id="color-choice">
         <button type="button" data-color="w" aria-pressed="true">${pieceUse('w', 'k')}White</button>
         <button type="button" data-color="random" aria-pressed="false">${pieceUse('w', 'p')}Random</button>
@@ -496,8 +491,8 @@ function panelSetup() {
       </div>
       <div class="button-stack">
         <button class="btn btn--primary" id="start-game">Start game</button>
-        <button class="btn btn--quiet" id="setup-back">Back</button>
       </div>
+      <button class="link-action" id="setup-back" type="button">Back</button>
     </div>`;
 
   $('difficulty-list').onclick = (event) => {
@@ -505,6 +500,7 @@ function panelSetup() {
     if (!button) return;
     level = button.dataset.level;
     $('difficulty-list').querySelectorAll('button').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+    $('level-blurb').textContent = BOTS[level].blurb;
   };
   $('color-choice').onclick = (event) => {
     const button = event.target.closest('[data-color]');

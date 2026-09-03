@@ -36,8 +36,8 @@ body {
   --accent-ink: #2a0f09;
   --signal: #e4b75d;
   --signal-ink: #241c0b;
-  --sq-light: #d9d3c2;
-  --sq-dark: #667b89;
+  --sq-light: #e4dac8;
+  --sq-dark: #7c5a42;
   --move: rgba(228, 183, 93, .55);
   --focus: #ff9a85;
 
@@ -134,10 +134,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
   font-weight: var(--w-semi);
   white-space: nowrap;
 }
-.brand b { color: var(--accent); font-weight: var(--w-semi); }
-.brand__mark { width: 30px; height: 30px; flex: 0 0 30px; }
-.brand__mark path:first-child { fill: var(--surface-3); stroke: var(--accent); stroke-width: 1.8; }
-.brand__mark path:last-child { fill: none; stroke: var(--text); stroke-width: 2.2; stroke-linecap: round; }
+.brand b { color: var(--muted); font-weight: var(--w-regular); font-size: .68em; letter-spacing: 0; margin-left: 1px; }
+.brand__mark { width: 27px; height: 27px; flex: 0 0 27px; }
+.brand__mark path { fill: var(--accent); }
 .topbar__actions { display: flex; align-items: center; gap: 6px; }
 .top-action {
   min-height: 38px;
@@ -165,7 +164,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   margin: 0 auto;
   padding: var(--s-6) 0 var(--s-8);
   display: grid;
-  grid-template-columns: minmax(520px, 1fr) minmax(380px, 460px);
+  grid-template-columns: minmax(520px, auto) minmax(380px, 460px);
   gap: 40px;
   justify-content: center;
   align-items: start;
@@ -240,8 +239,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .coord--rank { top: 5%; left: 5%; }
 .coord--file { bottom: 5%; right: 5%; }
-.coord--on-light { color: #5b7180; }
-.coord--on-dark { color: #e8e1cf; }
+.coord--on-light { color: #a08862; }
+.coord--on-dark { color: #ecdfc8; }
 .piece {
   position: absolute;
   width: 12.5%;
@@ -305,14 +304,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
   flex: 0 0 36px;
   display: grid;
   place-items: center;
-  border-radius: var(--r-md);
-  background: var(--surface-3);
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-size: var(--t-body);
-  font-weight: var(--w-bold);
+  border-radius: 50%;
+  background: var(--surface-2);
 }
-.avatar--bot { color: var(--accent-soft); }
+.avatar svg { width: 58%; height: 58%; }
+.avatar--bot svg { fill: var(--accent-soft); }
+.avatar--you svg { fill: var(--text); }
 .playerbar__identity { min-width: 88px; }
 .playerbar__identity strong { display: block; font-size: var(--t-body); line-height: 1.3; }
 .playerbar__identity span { display: block; margin-top: 2px; color: var(--muted); font-size: var(--t-small); line-height: 1.3; }
@@ -453,11 +450,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .desk-footer { margin-top: auto; border-top: 1px solid var(--line); padding: var(--s-4) var(--s-5); display: flex; gap: var(--s-2); }
 .desk-footer .btn { flex: 1; }
 
-.rule-sequence { display: grid; gap: var(--s-4); margin: 2px 0 var(--s-5); }
-.rule-step { display: grid; grid-template-columns: 34px 1fr; gap: var(--s-3); align-items: start; }
-.rule-step__number { font-size: var(--t-title); letter-spacing: var(--track-title); font-weight: var(--w-bold); line-height: 1; color: var(--accent-soft); font-variant-numeric: tabular-nums; }
-.rule-step strong { display: block; font-size: var(--t-body); }
-.rule-step p { margin: 2px 0 0; color: var(--muted); font-size: var(--t-small); line-height: 1.5; }
+.rule-flow { margin: 2px 0 var(--s-6); color: var(--muted); font-size: var(--t-body); line-height: 1.65; }
+.rule-flow b { color: var(--text); font-weight: var(--w-semi); }
 
 .btn {
   width: 100%;
@@ -491,6 +485,26 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .btn:disabled:hover,
 .btn:disabled:active { opacity: .45; cursor: not-allowed; transform: none; }
 .button-stack { display: grid; gap: var(--s-3); }
+/* A tertiary action next to a real button doesn't need to look like one too:
+   stacking equal-weight boxes is what a generated form does. */
+.link-action {
+  display: block;
+  width: 100%;
+  margin-top: var(--s-3);
+  padding: var(--s-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--t-small);
+  font-weight: var(--w-medium);
+  text-align: center;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color .15s var(--ease-tint), text-decoration-color .15s var(--ease-tint);
+}
+.link-action:hover { color: var(--text); text-decoration-color: var(--line-strong); }
 
 .resume-card {
   margin-bottom: var(--s-4);
@@ -510,27 +524,32 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .stat strong { display: block; font-size: var(--t-title); letter-spacing: var(--track-title); }
 .stat span { display: block; color: var(--muted); font-size: var(--t-micro); margin-top: 2px; }
 
-.section-title { letter-spacing: var(--track-label); text-transform: uppercase; font-size: var(--t-small); font-weight: var(--w-bold); margin: 0 0 var(--s-2); }
-.difficulty-list { display: grid; gap: var(--s-2); }
-.difficulty {
-  width: 100%;
+.section-title { letter-spacing: var(--track-label); text-transform: uppercase; font-size: var(--t-small); font-weight: var(--w-bold); margin: var(--s-5) 0 var(--s-2); }
+.section-title:first-child { margin-top: 0; }
+/* A single bordered strip, not three stacked description cards: the level
+   name IS the control, and one line of copy below explains the pick. */
+.level-select {
+  display: flex;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: transparent;
-  padding: var(--s-3);
-  color: var(--text);
-  text-align: left;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px var(--s-3);
-  cursor: pointer;
-  transition: border-color .15s var(--ease-tint), background-color .15s var(--ease-tint);
+  overflow: hidden;
 }
-.difficulty:hover { border-color: var(--line-strong); background: var(--surface-2); }
-.difficulty[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
-.difficulty strong { font-size: var(--t-body); }
-.difficulty span { color: var(--muted); font-size: var(--t-small); grid-column: 1; }
-.difficulty em { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-style: normal; color: var(--muted); font-size: var(--t-small); }
+.level-select button {
+  flex: 1;
+  min-height: 46px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--t-body);
+  font-weight: var(--w-semi);
+  cursor: pointer;
+  transition: background-color .15s var(--ease-tint), color .15s var(--ease-tint);
+}
+.level-select button:last-child { border-right: 0; }
+.level-select button:hover { color: var(--text); }
+.level-select button[aria-pressed="true"] { background: var(--accent); color: #1c0c08; }
+.level-blurb { margin: var(--s-2) 0 0; color: var(--muted); font-size: var(--t-small); line-height: 1.5; min-height: 2.4em; }
 
 .color-choice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: var(--s-2) 0 var(--s-5); }
 .color-choice button {
@@ -802,8 +821,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .matchdesk--setup .desk-head { border-bottom: 0; padding-bottom: var(--s-1); }
   .matchdesk--home .desk-head p,
   .matchdesk--setup .desk-head p { font-size: var(--t-small); }
-  .matchdesk--home .rule-sequence { gap: var(--s-2); margin-bottom: var(--s-4); }
-  .matchdesk--home .rule-step p { font-size: var(--t-micro); }
+  .matchdesk--home .rule-flow { margin-bottom: var(--s-4); font-size: var(--t-small); }
 
   /* The sheet is the only scroller, so the primary action can pin itself to
      the bottom and stay reachable on short phones and in landscape. */
@@ -829,8 +847,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .matchdesk--home .desk-head,
   .matchdesk--setup .desk-head { padding-top: var(--s-4); }
   .matchdesk--setup .desk-head p { display: none; }
-  .matchdesk--setup .difficulty span { display: none; }
-  .matchdesk--home .rule-step p { display: none; }
+  .matchdesk--setup .level-blurb { display: none; }
+  .matchdesk--home .rule-flow { display: none; }
 }
 
 @media (max-width: 700px) {
@@ -886,17 +904,14 @@ button, a { -webkit-tap-highlight-color: transparent; }
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  margin: var(--s-2) 0 0;
-  min-height: 56px;
-  padding: var(--s-2) var(--s-3);
-  background: var(--surface-2);
-  border: 1px solid var(--line);
+  margin: var(--s-3) 0 0;
+  min-height: 44px;
+  padding: 2px 0 2px var(--s-3);
   border-left: 3px solid var(--accent);
-  border-radius: var(--r-md);
   color: var(--text);
   font-size: var(--t-small);
   font-weight: var(--w-medium);
-  line-height: 1.3;
+  line-height: 1.4;
 }
 
 .bot-taunt[data-empty="true"] { visibility: hidden; }
@@ -908,12 +923,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
   height: 26px;
   display: grid;
   place-items: center;
-  border-radius: var(--r-md);
+  border-radius: 50%;
   background: var(--surface-3);
-  color: var(--accent-soft);
-  font-size: var(--t-small);
-  font-weight: var(--w-bold);
 }
+.bot-taunt__who svg { width: 58%; height: 58%; fill: var(--accent-soft); }
 
 .bot-taunt__line { min-width: 0; }
 
