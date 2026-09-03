@@ -1409,6 +1409,7 @@ function showRules() {
         <li><span class="rule-mark">5</span><span><b>No limits, and MottyBot plays the same way.</b> Every fresh matching capture is another chance, each return uses up one dead piece, and MottyBot will take its own pieces back the moment you let it.</span></li>
         <li><span class="rule-mark">6</span><span><b>Everything else is chess.</b> Check, checkmate, castling, promotion. Draws: stalemate, threefold repetition, the fifty-move rule, or nothing left but the two kings. A returned rook cannot castle, and in check a return must block the check.</span></li>
       </ol>
+      <p class="credit-line">Chess pieces by Colin M. L. Burnett, <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a>.</p>
       <div class="button-stack"><button class="btn btn--primary" id="rules-ok">Got it</button></div>
     </div>`);
   $('rules-ok').onclick = hideModal;

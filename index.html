@@ -26,8 +26,9 @@
 
   <header class="topbar">
     <a class="brand" href="/" aria-label="Chess, Motty's Version home">
-      <svg class="brand__mark" viewBox="24 16 56 72" aria-hidden="true">
-        <path d="M30,84 C29,66 33,54 42,48 L36,45 L34,40.5 L40.5,38.5 L40,26 C42,22 47,21 50,24 L54,28 C62,26 69,31 71,40 L74,58 C75,68 74,77 72,84 Z"/>
+      <svg class="brand__mark" viewBox="4 4 38 28" aria-hidden="true">
+        <path d="M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21"/>
+        <path d="M24 18c.38 2.91-5.55 7.37-8 9-3 2-2.82 4.34-5 4-1.042-.94 1.41-3.04 0-3-1 0 .19 1.23-1 2-1 0-4.003 1-4-4 0-2 6-12 6-12s1.89-1.9 2-3.5c-.73-.994-.5-2-.5-3 1-1 3 2.5 3 2.5h2s.78-1.992 2.5-3c1 0 1 3 1 3"/>
       </svg>
       <span>Chess <b>(Motty's Version)</b></span>
     </a>
@@ -51,7 +52,7 @@
     <section class="arena" aria-label="Current chess game">
       <div class="playerbar playerbar--top" id="row-top">
         <div class="avatar avatar--bot" id="top-avatar" aria-hidden="true">
-          <svg viewBox="24 16 56 72"><path d="M30,84 C29,66 33,54 42,48 L36,45 L34,40.5 L40.5,38.5 L40,26 C42,22 47,21 50,24 L54,28 C62,26 69,31 71,40 L74,58 C75,68 74,77 72,84 Z"/></svg>
+          <svg viewBox="4 4 38 28"><path d="M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21"/><path d="M24 18c.38 2.91-5.55 7.37-8 9-3 2-2.82 4.34-5 4-1.042-.94 1.41-3.04 0-3-1 0 .19 1.23-1 2-1 0-4.003 1-4-4 0-2 6-12 6-12s1.89-1.9 2-3.5c-.73-.994-.5-2-.5-3 1-1 3 2.5 3 2.5h2s.78-1.992 2.5-3c1 0 1 3 1 3"/></svg>
         </div>
         <div class="playerbar__identity">
           <strong id="top-name">MottyBot</strong>
@@ -80,7 +81,7 @@
 
       <div class="playerbar playerbar--bottom" id="row-bottom">
         <div class="avatar avatar--you" id="bottom-avatar" aria-hidden="true">
-          <svg viewBox="18 16 64 58"><circle cx="50" cy="30" r="12"/><path d="M38,58 C39,48 43,42 50,42 C57,42 61,48 62,58 L67,72 H33 Z"/></svg>
+          <svg viewBox="10 8 25 20"><path d="M22.5 9c-2.21 0-4 1.79-4 4 0 .89.29 1.71.78 2.38C17.33 16.5 16 18.59 16 21c0 2.03.94 3.84 2.41 5.03-3 1.06-7.41 5.55-7.41 13.47h23c0-7.92-4.41-12.41-7.41-13.47 1.47-1.19 2.41-3 2.41-5.03 0-2.41-1.33-4.5-3.28-5.62.49-.67.78-1.49.78-2.38 0-2.21-1.79-4-4-4z"/></svg>
         </div>
         <div class="playerbar__identity">
           <strong id="bottom-name">You</strong>
@@ -91,7 +92,7 @@
       </div>
 
       <div class="bot-taunt" id="bot-taunt" aria-live="polite" data-empty="true">
-        <span class="bot-taunt__who" aria-hidden="true"><svg viewBox="24 16 56 72"><path d="M30,84 C29,66 33,54 42,48 L36,45 L34,40.5 L40.5,38.5 L40,26 C42,22 47,21 50,24 L54,28 C62,26 69,31 71,40 L74,58 C75,68 74,77 72,84 Z"/></svg></span>
+        <span class="bot-taunt__who" aria-hidden="true"><svg viewBox="4 4 38 28"><path d="M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21"/><path d="M24 18c.38 2.91-5.55 7.37-8 9-3 2-2.82 4.34-5 4-1.042-.94 1.41-3.04 0-3-1 0 .19 1.23-1 2-1 0-4.003 1-4-4 0-2 6-12 6-12s1.89-1.9 2-3.5c-.73-.994-.5-2-.5-3 1-1 3 2.5 3 2.5h2s.78-1.992 2.5-3c1 0 1 3 1 3"/></svg></span>
         <span class="bot-taunt__line" id="bot-taunt-line"></span>
       </div>
     </section>

@@ -1,73 +1,122 @@
-// Original piece set: flat solid silhouette, thin single-weight accent line,
-// no cartoon shading or "cute" detail (the old set's knight had a drawn eye
-// dot and a heavy uniform 4.35px outline that read as a toy/mascot set, not
-// a chess set). Geometry composed from scratch, not traced from any existing
-// set or engine.
+// Piece set: "cburnett" by Colin M.L. Burnett, used unmodified apart from
+// recoloring to this project's palette. Dual-licensed GNU Free Documentation
+// License 1.2+ and Creative Commons Attribution-ShareAlike 3.0 Unported.
+// Source: https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces
+// Author: Colin M.L. Burnett. License: https://creativecommons.org/licenses/by-sa/3.0/
+//
+// Three attempts at drawing an original set from scratch (thick uniform
+// outline with a cartoon eye; then rebuilt anatomy for the knight only;
+// then rebuilt proportions for the rest without ever getting a reliable
+// read on whether the result actually looked right) did not produce
+// something that reads as well-made. Motty's version has plenty of its own
+// original design elsewhere -- pieces don't need to be reinvented to prove
+// that, and a battle-tested, professionally-drawn set serves the game
+// better than another guess. Recolored (fill/stroke only, geometry
+// untouched) to this project's palette; see attribution above.
 
 const THEME = {
-  w: { fill: '#F4F1E8', line: '#2B2620' },
-  b: { fill: '#23282C', line: '#0C0E0F' },
+  w: { fill: '#F7F3E9', line: '#241f19', hi: '#241f19' },
+  b: { fill: '#26211d', line: '#0a0806', hi: '#6b5d4f' },
 };
-
-const SW = 2.4; // crisp thin line, not a coloring-book outline
 
 function wrap(color, inner) {
   const c = THEME[color];
   return inner
     .replaceAll('{F}', c.fill)
     .replaceAll('{L}', c.line)
-    .replaceAll('{W}', String(SW));
+    .replaceAll('{H}', c.hi);
 }
 
 const SHAPES = {
-  // Pawn: ball head, tapered body, plinth. Three shapes, nothing more.
-  p: `
-    <circle cx="50" cy="30" r="12" fill="{F}" stroke="{L}" stroke-width="{W}"/>
-    <path d="M38,58 C39,48 43,42 50,42 C57,42 61,48 62,58 L67,72 H33 Z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M28,72 H72 L75,84 H25 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-  `,
-  // Rook: square crenellated tower, straight shaft, plinth.
-  r: `
-    <path d="M32,24 H42 V32 H48 V24 H52 V32 H58 V24 H68 V40 L62,46 V70 H38 V46 L32,40 Z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M30,70 H70 L74,84 H26 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-  `,
-  // Knight: horse-head profile, cut ear notch (not a drawn eye), plinth.
-  n: `
-    <path d="M30,84 C29,66 33,54 42,48 L36,45 L34,40.5 L40.5,38.5 L40,26 C42,22 47,21 50,24
-             L54,28 C62,26 69,31 71,40 L74,58 C75,68 74,77 72,84 Z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M25,84 H75 L78,92 H22 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-  `,
-  // Bishop: ball finial, tapered mitre with a single diagonal slit, plinth.
-  b: `
-    <circle cx="50" cy="16" r="4" fill="{F}" stroke="{L}" stroke-width="{W}"/>
-    <path d="M50,23 C58,32 63,42 61,54 C60,62 55,68 50,68 C45,68 40,62 39,54 C37,42 42,32 50,23 Z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M40,34 L60,50" stroke="{L}" stroke-width="2.6" stroke-linecap="round" fill="none"/>
-    <path d="M33,68 H67 L70,80 H30 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-  `,
-  // Queen: five-point coronet, bell gown, plinth.
-  q: `
-    <path d="M24,54 L20,30 L32,40 L38,20 L50,34 L62,20 L68,40 L80,30 L76,54 L70,68 H30 Z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <circle cx="20" cy="27" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
-    <circle cx="38" cy="17" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
-    <circle cx="50" cy="14" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
-    <circle cx="62" cy="17" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
-    <circle cx="80" cy="27" r="3.2" fill="{F}" stroke="{L}" stroke-width="2"/>
-    <path d="M28,68 H72 L76,82 H24 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-  `,
-  // King: cross finial, two-lobe crown, mantle, plinth.
-  k: `
-    <path d="M47,6 H53 V13 H60 V19 H53 V26 H47 V19 H40 V13 H47 Z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M36,58 C28,52 26,42 32,35 C37,29 45,29 50,35 C55,29 63,29 68,35 C74,42 72,52 64,58 Z"
-          fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M35,58 H65 L68,70 H32 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-    <path d="M28,70 H72 L76,84 H24 Z" fill="{F}" stroke="{L}" stroke-width="{W}" stroke-linejoin="round"/>
-  `,
+  w: {
+    k: `
+      <g fill="none" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path stroke-linejoin="miter" d="M22.5 11.63V6M20 8h5"/>
+        <path fill="{F}" stroke-linecap="butt" stroke-linejoin="miter" d="M22.5 25s4.5-7.5 3-10.5c0 0-1-2.5-3-2.5s-3 2.5-3 2.5c-1.5 3 3 10.5 3 10.5"/>
+        <path fill="{F}" d="M11.5 37c5.5 3.5 15.5 3.5 21 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V27v-3.5c-3.5-7.5-13-10.5-16-4-3 6 5 10 5 10z"/>
+        <path d="M11.5 30c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0"/>
+      </g>`,
+    q: `
+      <g fill="{F}" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g stroke="none">
+          <circle cx="6" cy="12" r="2"/><circle cx="22.5" cy="7.5" r="2"/><circle cx="39" cy="12" r="2"/>
+          <circle cx="14" cy="8.5" r="2"/><circle cx="31" cy="9" r="2"/>
+        </g>
+        <path stroke-linecap="butt" d="M9 26c8.5-1.5 21-1.5 27 0l2-12-7 11V11l-5.5 13.5-3-15-3 15-5.5-14V25L7 14z"/>
+        <path stroke-linecap="butt" d="M9 26c0 2 1.5 2 2.5 4 1 1.5 1 1 .5 3.5-1.5 1-1.5 2.5-1.5 2.5-1.5 1.5.5 2.5.5 2.5 6.5 1 16.5 1 23 0 0 0 1.5-1 0-2.5 0 0 .5-1.5-1-2.5-.5-2.5-.5-2 .5-3.5 1-2 2.5-2 2.5-4-8.5-1.5-18.5-1.5-27 0z"/>
+        <path fill="none" d="M11.5 30c3.5-1 18.5-1 22 0M12 33.5c6-1 15-1 21 0"/>
+      </g>`,
+    r: `
+      <g fill="{F}" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path stroke-linecap="butt" d="M9 39h27v-3H9zm3-3v-4h21v4zm-1-22V9h4v2h5V9h5v2h5V9h4v5"/>
+        <path d="m34 14-3 3H14l-3-3"/>
+        <path stroke-linecap="butt" stroke-linejoin="miter" d="M31 17v12.5H14V17"/>
+        <path d="m31 29.5 1.5 2.5h-20l1.5-2.5"/>
+        <path fill="none" stroke-linejoin="miter" d="M11 14h23"/>
+      </g>`,
+    b: `
+      <g fill="none" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g fill="{F}" stroke-linecap="butt">
+          <path d="M9 36c3.39-.97 10.11.43 13.5-2 3.39 2.43 10.11 1.03 13.5 2 0 0 1.65.54 3 2-.68.97-1.65.99-3 .5-3.39-.97-10.11.46-13.5-1-3.39 1.46-10.11.03-13.5 1-1.35.49-2.32.47-3-.5 1.35-1.94 3-2 3-2z"/>
+          <path d="M15 32c2.5 2.5 12.5 2.5 15 0 .5-1.5 0-2 0-2 0-2.5-2.5-4-2.5-4 5.5-1.5 6-11.5-5-15.5-11 4-10.5 14-5 15.5 0 0-2.5 1.5-2.5 4 0 0-.5.5 0 2z"/>
+          <path d="M25 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0z"/>
+        </g>
+        <path stroke-linejoin="miter" d="M17.5 26h10M15 30h15m-7.5-14.5v5M20 18h5"/>
+      </g>`,
+    n: `
+      <g fill="none" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path fill="{F}" d="M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21"/>
+        <path fill="{F}" d="M24 18c.38 2.91-5.55 7.37-8 9-3 2-2.82 4.34-5 4-1.042-.94 1.41-3.04 0-3-1 0 .19 1.23-1 2-1 0-4.003 1-4-4 0-2 6-12 6-12s1.89-1.9 2-3.5c-.73-.994-.5-2-.5-3 1-1 3 2.5 3 2.5h2s.78-1.992 2.5-3c1 0 1 3 1 3"/>
+        <path fill="{L}" stroke="{L}" d="M9.5 25.5a.5.5 0 1 1-1 0 .5.5 0 1 1 1 0m5.433-9.75a.5 1.5 30 1 1-.866-.5.5 1.5 30 1 1 .866.5"/>
+      </g>`,
+    p: `<path fill="{F}" stroke="{L}" stroke-linecap="round" stroke-width="1.5" d="M22.5 9c-2.21 0-4 1.79-4 4 0 .89.29 1.71.78 2.38C17.33 16.5 16 18.59 16 21c0 2.03.94 3.84 2.41 5.03-3 1.06-7.41 5.55-7.41 13.47h23c0-7.92-4.41-12.41-7.41-13.47 1.47-1.19 2.41-3 2.41-5.03 0-2.41-1.33-4.5-3.28-5.62.49-.67.78-1.49.78-2.38 0-2.21-1.79-4-4-4z"/>`,
+  },
+  b: {
+    k: `
+      <g fill="none" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path stroke-linejoin="miter" d="M22.5 11.6V6"/>
+        <path fill="{F}" stroke-linecap="butt" stroke-linejoin="miter" d="M22.5 25s4.5-7.5 3-10.5c0 0-1-2.5-3-2.5s-3 2.5-3 2.5c-1.5 3 3 10.5 3 10.5"/>
+        <path fill="{F}" d="M11.5 37a22.3 22.3 0 0 0 21 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V27v-3.5c-3.5-7.5-13-10.5-16-4-3 6 5 10 5 10z"/>
+        <path stroke-linejoin="miter" d="M20 8h5"/>
+        <path stroke="{H}" d="M32 29.5s8.5-4 6-9.7C34.1 14 25 18 22.5 24.6v2.1-2.1C20 18 9.9 14 7 19.9c-2.5 5.6 4.8 9 4.8 9"/>
+        <path stroke="{H}" d="M11.5 30c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0"/>
+      </g>`,
+    q: `
+      <g fill-rule="evenodd" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g fill="{F}" stroke="none">
+          <circle cx="6" cy="12" r="2.75"/><circle cx="14" cy="9" r="2.75"/><circle cx="22.5" cy="8" r="2.75"/>
+          <circle cx="31" cy="9" r="2.75"/><circle cx="39" cy="12" r="2.75"/>
+        </g>
+        <path fill="{F}" stroke-linecap="butt" d="M9 26c8.5-1.5 21-1.5 27 0l2.5-12.5L31 25l-.3-14.1-5.2 13.6-3-14.5-3 14.5-5.2-13.6L14 25 6.5 13.5z"/>
+        <path fill="{F}" stroke-linecap="butt" d="M9 26c0 2 1.5 2 2.5 4 1 1.5 1 1 .5 3.5-1.5 1-1.5 2.5-1.5 2.5-1.5 1.5.5 2.5.5 2.5 6.5 1 16.5 1 23 0 0 0 1.5-1 0-2.5 0 0 .5-1.5-1-2.5-.5-2.5-.5-2 .5-3.5 1-2 2.5-2 2.5-4-8.5-1.5-18.5-1.5-27 0z"/>
+        <path fill="none" stroke-linecap="butt" d="M11 38.5a35 35 1 0 0 23 0"/>
+        <path fill="none" stroke="{H}" d="M11 29a35 35 1 0 1 23 0m-21.5 2.5h20m-21 3a35 35 1 0 0 22 0m-23 3a35 35 1 0 0 24 0"/>
+      </g>`,
+    r: `
+      <g fill-rule="evenodd" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path fill="{F}" stroke-linecap="butt" d="M9 39h27v-3H9zm3.5-7 1.5-2.5h17l1.5 2.5zm-.5 4v-4h21v4z"/>
+        <path fill="{F}" stroke-linecap="butt" stroke-linejoin="miter" d="M14 29.5v-13h17v13z"/>
+        <path fill="{F}" stroke-linecap="butt" d="M14 16.5 11 14h23l-3 2.5zM11 14V9h4v2h5V9h5v2h5V9h4v5z"/>
+        <path fill="none" stroke="{H}" stroke-linejoin="miter" stroke-width="1" d="M12 35.5h21m-20-4h19m-18-2h17m-17-13h17M11 14h23"/>
+      </g>`,
+    b: `
+      <g fill="none" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g fill="{F}" stroke-linecap="butt">
+          <path d="M9 36c3.4-1 10.1.4 13.5-2 3.4 2.4 10.1 1 13.5 2 0 0 1.6.5 3 2-.7 1-1.6 1-3 .5-3.4-1-10.1.5-13.5-1-3.4 1.5-10.1 0-13.5 1-1.4.5-2.3.5-3-.5 1.4-2 3-2 3-2z"/>
+          <path d="M15 32c2.5 2.5 12.5 2.5 15 0 .5-1.5 0-2 0-2 0-2.5-2.5-4-2.5-4 5.5-1.5 6-11.5-5-15.5-11 4-10.5 14-5 15.5 0 0-2.5 1.5-2.5 4 0 0-.5.5 0 2z"/>
+          <path d="M25 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0z"/>
+        </g>
+        <path stroke="{H}" stroke-linejoin="miter" d="M17.5 26h10M15 30h15m-7.5-14.5v5M20 18h5"/>
+      </g>`,
+    n: `
+      <g fill="none" stroke="{L}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path fill="{F}" d="M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21"/>
+        <path fill="{F}" d="M24 18c.38 2.91-5.55 7.37-8 9-3 2-2.82 4.34-5 4-1.04-.94 1.41-3.04 0-3-1 0 .19 1.23-1 2-1 0-4 1-4-4 0-2 6-12 6-12s1.89-1.9 2-3.5c-.73-1-.5-2-.5-3 1-1 3 2.5 3 2.5h2s.78-2 2.5-3c1 0 1 3 1 3"/>
+        <path fill="{H}" stroke="{H}" d="M9.5 25.5a.5.5 0 1 1-1 0 .5.5 0 1 1 1 0m5.43-9.75a.5 1.5 30 1 1-.86-.5.5 1.5 30 1 1 .86.5"/>
+        <path fill="{H}" stroke="none" d="m24.55 10.4-.45 1.45.5.15c3.15 1 5.65 2.49 7.9 6.75S35.75 29.06 35.25 39l-.05.5h2.25l.05-.5c.5-10.06-.88-16.85-3.25-21.34s-5.79-6.64-9.19-7.16z"/>
+      </g>`,
+    p: `<path fill="{F}" stroke="{L}" stroke-linecap="round" stroke-width="1.5" d="M22.5 9a4 4 0 0 0-3.22 6.38 6.48 6.48 0 0 0-.87 10.65c-3 1.06-7.41 5.55-7.41 13.47h23c0-7.92-4.41-12.41-7.41-13.47a6.46 6.46 0 0 0-.87-10.65A4.01 4.01 0 0 0 22.5 9z"/>`,
+  },
 };
 
 export const PIECE_KEYS = ['wk', 'wq', 'wr', 'wb', 'wn', 'wp', 'bk', 'bq', 'br', 'bb', 'bn', 'bp'];
@@ -75,13 +124,13 @@ export const PIECE_KEYS = ['wk', 'wq', 'wr', 'wb', 'wn', 'wp', 'bk', 'bq', 'br',
 export function pieceSpriteSVG() {
   let symbols = '';
   for (const color of ['w', 'b']) {
-    for (const [type, tpl] of Object.entries(SHAPES)) {
-      symbols += `<symbol id="pc-${color}${type}" viewBox="0 0 100 100">${wrap(color, tpl)}</symbol>`;
+    for (const [type, tpl] of Object.entries(SHAPES[color])) {
+      symbols += `<symbol id="pc-${color}${type}" viewBox="0 0 45 45">${wrap(color, tpl)}</symbol>`;
     }
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true"><defs>${symbols}</defs></svg>`;
 }
 
 export function pieceUse(color, type, extra = '') {
-  return `<svg viewBox="0 0 100 100" ${extra}><use href="#pc-${color}${type}"/></svg>`;
+  return `<svg viewBox="0 0 45 45" ${extra}><use href="#pc-${color}${type}"/></svg>`;
 }

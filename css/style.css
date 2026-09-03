@@ -36,8 +36,8 @@ body {
   --accent-ink: #2a0f09;
   --signal: #e4b75d;
   --signal-ink: #241c0b;
-  --sq-light: #e4dac8;
-  --sq-dark: #7c5a42;
+  --sq-light: #f0dab4;
+  --sq-dark: #b3835c;
   --move: rgba(228, 183, 93, .55);
   --focus: #ff9a85;
 
@@ -239,8 +239,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .coord--rank { top: 5%; left: 5%; }
 .coord--file { bottom: 5%; right: 5%; }
-.coord--on-light { color: #a08862; }
-.coord--on-dark { color: #ecdfc8; }
+.coord--on-light { color: #a3794f; }
+.coord--on-dark { color: #f3e2c4; }
 .piece {
   position: absolute;
   width: 12.5%;
@@ -696,6 +696,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .rule-list li { display: grid; grid-template-columns: 28px 1fr; gap: var(--s-3); color: var(--muted); line-height: 1.5; }
 .rule-list b { color: var(--text); }
 .rule-mark { color: var(--accent); font-weight: var(--w-bold); }
+.credit-line { margin: var(--s-4) 0 0; color: var(--muted); font-size: var(--t-micro); }
+.credit-line a { color: var(--muted); }
+.credit-line a:hover { color: var(--text); }
 
 /* The end of the game should be readable from across the room, and it should
    say what happened to YOU rather than make you work it out. */
